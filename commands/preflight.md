@@ -1,0 +1,7 @@
+---
+description: "Check this machine for what the quality gates need — git, the GitHub CLI and its sign-in, Docker, the project database and Chromium — and say which gate each missing item will skip"
+---
+1. From this repository root run `node "$HOME/.holycode-hub/pi/scripts/preflight.mjs"` and show the developer its report as printed — one line per item: present (✓), not needed here (–), or missing (✗) with the gate it will cause to skip (for example `✗ Chromium not found: screenshot and runtime gates will skip`).
+2. The check only reads. Never install, start, sign in or change anything yourself; for each missing item point the developer to the setup steps in the Hub documentation (Getting started → Your first hour) and let them fix it.
+3. A non-zero exit means a required item is missing: tell the developer those gates will skip until it is fixed, and suggest running `/holycode-hub:preflight` again afterwards. This command makes no Hub call. **Next step:** end your reply with one line that starts with `Next:` — `Next: fix the missing items and run /holycode-hub:preflight again` — or, when nothing is missing, `Next: /holycode-hub:claim a story`. Make no further Hub calls for this step.
+4. Then run `node "$HOME/.holycode-hub/pi/scripts/pi-preflight.mjs"` and show its three lines as printed: the Pi version, this package's version and whether a model is set (when none is, point the developer to `/holycode-hub:models add`).
