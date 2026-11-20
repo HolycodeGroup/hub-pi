@@ -8,7 +8,9 @@
 //    at the Hub's /oauth/authorize); in print / JSON mode it names the command instead (HH-596).
 //  - On every Hub work_sync / work_claim call: adds `client_kind: "pi"` (HH-597).
 //  - On every session start: the session-start banner (git conventions, link state, project rules,
-//    a stale AGENTS.md block, the model and its tier) joins the conversation (HH-599).
+//    a stale AGENTS.md block, the model and its tier) joins the conversation (HH-599); while the
+//    Hub's recommended list is missing or a day old it asks for one work_models call (HH-669).
+//  - After a successful Hub work_models call: saves the answer as the recommended list (HH-669).
 //  - After a successful Hub work_claim / work_progress / work_verify: renews the story worktree's
 //    lease, like the Claude Code worktree hook (HH-599).
 //  - Effort on the held story (HH-600): Pi's events feed the Claude Code effort engine (human / AI
@@ -29,7 +31,7 @@ import { tagClientKind } from '../src/hub-calls';
 import { ensureHubServer, piAgentDir } from '../src/hub-server';
 import { needsSignIn, signIn } from '../src/login';
 import { NO_MODEL_LINE, runModelsCommand } from '../src/models';
-import { savedTier } from '../src/model-tier';
+import { modelsListStale, savedTier, saveWorkModelsResult } from '../src/model-tier';
 import type { PiApi, PiContext, PiToolCallEvent, PiToolResultEvent } from '../src/pi-types';
 import { COMMAND_PREFIX } from '../src/render.mjs';
 import { installRuntime, piRuntimeDir } from '../src/runtime';
@@ -115,6 +117,11 @@ export default function holycodeHub(pi: PiApi): void {
     });
     if (result.isError === true) return;
     try {
+      saveWorkModelsResult(runtimeDir, result.toolName, result.content);
+    } catch {
+      // A list that cannot be written keeps the previous one; the Hub call still succeeded.
+    }
+    try {
       renewWorktreeLease(ctx.cwd, { tool_name: result.toolName, tool_input: result.input });
     } catch {
       // A worktree registry that cannot be read never fails the Hub call it follows.
@@ -127,6 +134,7 @@ export default function holycodeHub(pi: PiApi): void {
       shippedBlock: path.join(PACKAGE_ROOT, 'agents', 'hub-workflow-section.md'),
       model: ctx.model === undefined ? undefined : { provider: ctx.model.provider, id: ctx.model.id },
       tier: ctx.model === undefined ? 'UNKNOWN' : savedTier(runtimeDir, ctx.model.provider, ctx.model.id),
+      refreshModels: modelsListStale(runtimeDir),
     });
     pi.sendMessage({ customType: BANNER_TYPE, content: banner.join('\n'), display: true }, { deliverAs: 'nextTurn' });
     if ((event as { reason?: string }).reason !== 'startup') return;

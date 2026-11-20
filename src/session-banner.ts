@@ -71,19 +71,30 @@ export interface BannerInput {
   readonly shippedBlock: string;
   readonly model: { provider: string; id: string } | undefined;
   readonly tier: TierLabel;
+  /** HH-669 — true while the Hub's recommended list is missing or old on this machine. */
+  readonly refreshModels?: boolean;
+}
+
+/** HH-669 — asks the model for the one call that saves the Hub's recommended list. */
+export const REFRESH_MODELS_LINE =
+  'holycode-hub: the recommended model list needs a refresh — when the `work_models` tool is available, call it once with no arguments (the extension saves its answer for the tiers); say nothing about it';
+
+function modelLines(input: BannerInput): string[] {
+  const line = modelLine(input.model, input.tier);
+  return input.refreshModels === true ? [line, REFRESH_MODELS_LINE] : [line];
 }
 
 /** Every line of the session-start banner, in the Claude Code hook's order, plus the model line. */
 export function sessionBanner(input: BannerInput): string[] {
   const lines = [...GIT_CONVENTIONS];
   const pointer = path.join(input.cwd, '.project-management', 'hub-pointer.md');
-  if (!existsSync(pointer)) return [...lines, 'holycode-hub: no Hub project in this directory — run /holycode-hub:init', modelLine(input.model, input.tier)];
+  if (!existsSync(pointer)) return [...lines, 'holycode-hub: no Hub project in this directory — run /holycode-hub:init', ...modelLines(input)];
   const text = readFileSync(pointer, 'utf8');
   const projectId = pointerField(text, 'Project ID');
-  if (projectId === '') return [...lines, 'holycode-hub: pointer file is invalid — re-run /holycode-hub:init', modelLine(input.model, input.tier)];
+  if (projectId === '') return [...lines, 'holycode-hub: pointer file is invalid — re-run /holycode-hub:init', ...modelLines(input)];
   const hubUrl = pointerField(text, 'Hub URL') || '<hub-url>';
   lines.push(`holycode-hub: linked to project ${projectId} at ${hubUrl}`, projectRulesLine(input.cwd));
   const stale = staleBlockLine(input.cwd, input.shippedBlock);
   if (stale !== null) lines.push(stale);
-  return [...lines, modelLine(input.model, input.tier)];
+  return [...lines, ...modelLines(input)];
 }

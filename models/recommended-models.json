@@ -1,5 +1,5 @@
 {
-  "version": "2026-11-20.1",
+  "version": "2026-11-20.2",
   "models": [
     {
       "provider": "anthropic",
@@ -17,23 +17,37 @@
     },
     {
       "provider": "fireworks",
-      "model": "kimi-k2",
+      "model": "kimi-k3",
       "tier": "EXPERIMENTAL",
-      "notes": "Open-weight; not yet measured on the eval set (HH-607).",
+      "notes": "Open-weight; not yet measured through the Pi client (HH-607).",
       "settings": {}
     },
     {
       "provider": "fireworks",
-      "model": "glm-4.6",
+      "model": "kimi-k3p1-pro",
       "tier": "EXPERIMENTAL",
-      "notes": "Open-weight; not yet measured on the eval set (HH-607).",
+      "notes": "Open-weight; not yet measured through the Pi client (HH-607).",
       "settings": {}
     },
     {
       "provider": "fireworks",
-      "model": "qwen3-coder",
+      "model": "glm-5p3",
       "tier": "EXPERIMENTAL",
-      "notes": "Open-weight; not yet measured on the eval set (HH-607).",
+      "notes": "Open-weight; not yet measured through the Pi client (HH-607).",
+      "settings": {}
+    },
+    {
+      "provider": "fireworks",
+      "model": "qwen3p8-max",
+      "tier": "EXPERIMENTAL",
+      "notes": "Open-weight; not yet measured through the Pi client (HH-607).",
+      "settings": {}
+    },
+    {
+      "provider": "fireworks",
+      "model": "deepseek-v4p1-flash",
+      "tier": "EXPERIMENTAL",
+      "notes": "Open-weight; not yet measured through the Pi client (HH-607).",
       "settings": {}
     }
   ]

@@ -7,14 +7,16 @@
 //   /holycode-hub:models add [preset]            a preset (or any provider in Pi's catalogue), then
 //                                                Pi's hidden key prompt; local and custom endpoints
 //                                                are configured in Pi's models.json without a key
-//   /holycode-hub:models use <provider/model> [--project]
-//   /holycode-hub:models test [provider/model]   one tiny request: OK and the time, or the problem
+//   /holycode-hub:models use <model> [--project] switches the session; --project also stores it
+//                                                as the project default. <model> is provider/model
+//                                                or a short id that names one usable model
+//   /holycode-hub:models test [model]            one tiny request: OK and the time, or the problem
 //   /holycode-hub:models remove <provider>       deletes the stored key (Pi's `auth logout`)
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import type { PiApi, PiContext, PiModel } from './pi-types';
-import { readRecommended, tierOf, type RecommendedList } from './recommended-models';
+import { readRecommended, tierOf, trailingSegment, type RecommendedList } from './recommended-models';
 
 export interface Preset {
   readonly id: string;
@@ -46,6 +48,24 @@ export function parseModelsArgs(args: string): { action: ModelsAction; rest: str
   if (first === undefined) return { action: 'list', rest: [] };
   if (['add', 'use', 'test', 'remove'].includes(first)) return { action: first as ModelsAction, rest };
   return { error: `Unknown /holycode-hub:models action "${first}". Use add, use, test or remove.` };
+}
+
+/** How many matches an ambiguous short id names before "…". */
+const MATCHES_SHOWN = 5;
+
+/**
+ * HH-669 — the usable model a spec names: the exact `provider/id` first, else the one model whose id
+ * or trailing id segment (after the last `/`) is the spec. Several matches → an error naming them;
+ * none → `model` undefined with no error, so each caller keeps its own "unknown" line.
+ */
+export function resolveModel(available: readonly PiModel[], spec: string): { model?: PiModel; error?: string } {
+  const exact = available.find((m) => `${m.provider}/${m.id}` === spec);
+  if (exact !== undefined) return { model: exact };
+  const matches = available.filter((m) => m.id === spec || trailingSegment(m.id) === spec);
+  if (matches.length <= 1) return { model: matches[0] };
+  const names = matches.slice(0, MATCHES_SHOWN).map((m) => `${m.provider}/${m.id}`);
+  const more = matches.length > MATCHES_SHOWN ? ', …' : '';
+  return { error: `"${spec}" matches ${matches.length} models: ${names.join(', ')}${more}. Name one as provider/model.` };
 }
 
 /** One line per usable model: `* ` marks the one in use; the tier from the recommended list. */
@@ -156,25 +176,29 @@ export async function runModelsCommand(pi: PiApi, args: string, ctx: PiContext, 
   const available = ctx.modelRegistry?.getAvailable() ?? [];
   const list = readRecommended(deps.runtimeDir, deps.packageRoot);
   const say = (message: string, level: 'info' | 'warning' | 'error' = 'info') => ctx.ui.notify(message, level);
-  const named = (spec: string | undefined) => available.find((m) => `${m.provider}/${m.id}` === spec);
 
   switch (parsed.action) {
     case 'list':
       return say(modelListLines(available, ctx.model, list).join('\n'));
     case 'use': {
-      const model = named(parsed.rest[0]);
-      if (model === undefined) return say(`Unknown model "${parsed.rest[0] ?? ''}". Run /holycode-hub:models to see the usable ones.`, 'error');
+      const spec = parsed.rest.find((word) => word !== '--project') ?? '';
+      const { model, error } = resolveModel(available, spec);
+      if (error !== undefined) return say(error, 'error');
+      if (model === undefined) return say(`Unknown model "${spec}". Run /holycode-hub:models to see the usable ones.`, 'error');
       if (!providerAllowed(list, model.provider)) return say(notAllowedLine(list, model.provider), 'error');
-      if (parsed.rest.includes('--project')) {
-        setProjectModel(ctx.cwd, model.provider, model.id);
-        return say(`${model.provider}/${model.id} is now this project's model (.pi/settings.json holds its id only).`);
-      }
-      await pi.setModel(model);
-      return say(`Now using ${model.provider}/${model.id} for this session.`);
+      // --project switches the session too: the project default alone would only apply next session.
+      const project = parsed.rest.includes('--project');
+      const name = `${model.provider}/${model.id}`;
+      const switched = await pi.setModel(model).catch(() => false);
+      if (!switched) return say(`Pi did not switch to ${name}. Run /holycode-hub:models test ${name} to see why.`, 'error');
+      if (project) setProjectModel(ctx.cwd, model.provider, model.id);
+      return say(project ? `Now using ${name} for this session and as this project's model (.pi/settings.json holds its id only).` : `Now using ${name} for this session.`);
     }
     case 'test': {
-      const model = named(parsed.rest[0]) ?? (parsed.rest[0] === undefined ? ctx.model : undefined);
-      if (model === undefined) return say(parsed.rest[0] === undefined ? NO_MODEL_LINE : `Unknown model "${parsed.rest[0]}".`, 'error');
+      const spec = parsed.rest[0];
+      const { model, error } = spec === undefined ? { model: ctx.model } : resolveModel(available, spec);
+      if (error !== undefined) return say(error, 'error');
+      if (model === undefined) return say(spec === undefined ? NO_MODEL_LINE : `Unknown model "${spec}".`, 'error');
       const endpoint = model.baseUrl ?? model.provider;
       const outcome = await testModel(pi, ctx.cwd, `${model.provider}/${model.id}`, endpoint, model.provider === 'ollama');
       return say(outcome.message, outcome.ok ? 'info' : 'error');

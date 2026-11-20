@@ -65,12 +65,27 @@ export function readRecommended(runtimeDir: string, packageRoot: string): Recomm
   return { ...bundled, source: 'bundled' };
 }
 
+/** The part of a model id after its last `/` — the whole id when it has none. */
+export function trailingSegment(id: string): string {
+  return id.slice(id.lastIndexOf('/') + 1);
+}
+
+/**
+ * HH-669 — the list entry naming a model: the exact provider/model first, else the entry of that
+ * provider whose model is the id's trailing segment (the list says `kimi-k3`, Pi reports
+ * `accounts/fireworks/models/kimi-k3`). Shared by the list's tiers and the session-start tier.
+ */
+export function findListed<T extends { provider?: unknown; model?: unknown }>(entries: readonly T[], provider: string, model: string): T | undefined {
+  const sameProvider = entries.filter((m) => m.provider === provider);
+  return sameProvider.find((m) => m.model === model) ?? sameProvider.find((m) => m.model === trailingSegment(model));
+}
+
 /**
  * A model's tier. `NOT_LISTED` when the list does not name it; `UNKNOWN` when only the bundled
  * copy is known, so the tier may be out of date (the Hub has not answered on this machine yet).
  */
 export function tierOf(list: RecommendedList, provider: string, model: string): ModelTier | 'NOT_LISTED' | 'UNKNOWN' {
-  const found = list.models.find((m) => m.provider === provider && m.model === model);
+  const found = findListed(list.models, provider, model);
   if (found !== undefined) return found.tier;
   return list.source === 'bundled' ? 'UNKNOWN' : 'NOT_LISTED';
 }

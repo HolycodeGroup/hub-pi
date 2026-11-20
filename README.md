@@ -75,15 +75,22 @@ To go back to the production Hub, remove the override: `pi mcp remove -l holycod
 
 ## Release (Holycode staff)
 
-The Pi client is released on its own version line to the public repository
-`HolycodeGroup/hub-pi`, apart from the Hub and the Claude Code plugin (`pnpm promote` never touches
-it):
+The Pi client has its own version line and is published to the public repository
+`HolycodeGroup/hub-pi`. Raise `version` in `packages/client-pi/package.json` and add its
+`## [x.y.z]` section to `packages/client-pi/CHANGELOG.md` in a pull request; then either:
 
-1. Raise `version` in `packages/client-pi/package.json` and add its `## [x.y.z]` section to
-   `packages/client-pi/CHANGELOG.md`.
-2. `pnpm release:pi --dry-run` — builds `dist/hub-pi/` (only what Pi loads, plus README and
+- **With the Hub release (the usual way):** `pnpm promote` publishes `packages/client-pi` of the
+  released commit after the deploy, the tag and the Claude Code plugin, whenever its version is newer
+  than hub-pi's newest tag — with its own confirmation (`--yes-publish` covers it; `--no-publish`
+  skips it). Its plan stops before the deploy on a Pi version older than hub-pi's newest tag or one
+  without its CHANGELOG section, and warns when the Pi client changed but its version was not raised.
+  A rerun of `pnpm promote` finishes an interrupted Pi publish. See
+  [`docs/PRODUCTION-RUNBOOK.md`](../../docs/PRODUCTION-RUNBOOK.md) §2.
+- **Out of band, without a Hub release:** `pnpm release:pi`, which uses the same build and publish:
+
+1. `pnpm release:pi --dry-run` — builds `dist/hub-pi/` (only what Pi loads, plus README and
    CHANGELOG), runs the outgoing-content scan over it and prints what a publish would push.
-3. `pnpm release:pi --yes-publish` — the same, then pushes the tree to hub-pi's `main` and tags it
+2. `pnpm release:pi --yes-publish` — the same, then pushes the tree to hub-pi's `main` and tags it
    `v<version>`. A version hub-pi already has is never pushed again.
 
 Developers then run `/holycode-hub:update` in Pi (`pi update --extensions`, `/reload`, then
