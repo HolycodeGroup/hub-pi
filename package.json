@@ -1,6 +1,6 @@
 {
   "name": "holycode-hub-pi",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
   "description": "Rapid Dev Hub client for the Pi coding agent — commands, one extension (Hub connection and hooks) and the shared scripts. No method ships here.",
   "keywords": [

@@ -163,6 +163,18 @@ function notAllowedLine(list: RecommendedList, provider: string): string {
   return `${PROVIDER_NOT_ALLOWED}: ${provider}. Allowed: ${(list.allowedProviders ?? []).join(', ')}.`;
 }
 
+/**
+ * HH-671 — the model a `--worker-model <provider/model>` names, as `provider/id`: it must be a
+ * usable model in Pi and its provider must pass the organisation's allowed providers.
+ */
+export function workerModelChoice(available: readonly PiModel[], list: RecommendedList, spec: string): { model: string } | { error: string } {
+  const { model, error } = resolveModel(available, spec);
+  if (error !== undefined) return { error };
+  if (model === undefined) return { error: `Unknown model "${spec}" for the workers — run /holycode-hub:models list to see the usable ones.` };
+  if (!providerAllowed(list, model.provider)) return { error: notAllowedLine(list, model.provider) };
+  return { model: `${model.provider}/${model.id}` };
+}
+
 export interface ModelsDeps {
   readonly agentDir: string;
   readonly runtimeDir: string;

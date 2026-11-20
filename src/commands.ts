@@ -59,11 +59,31 @@ export function expandArguments(body: string, args: string): string {
 }
 
 /**
+ * HH-671 — what the Pi client adds to a framework card when it registers it, after the Hub's text.
+ * The Hub's card stays the one Claude Code runs; only Pi reads these lines, and only when its
+ * extension has the tool they name (an older Pi package never registers them).
+ */
+export const CARD_ADDENDA: Readonly<Record<string, string>> = Object.freeze({
+  'execute-work': [
+    '',
+    '**Pi: parallel standing order (background workers)** — in Pi this replaces the per-story loop and the parallel-run part of the standing-order paragraph above. Leave `--worker-model <provider/model>` out of every `/holycode-hub:*` argument, like `--parallel=N` and `--sequential`. In step 1 skip the claim\'s Start / Decline question for a standing order: the batch confirmation below is the Start answer for every handed-out story. After the claim, read the `parallel-worktrees` guidance and group the handed-out stories as it says, then call `holycode_standing_order` once with `action: "start"`, `scope` (the scope arguments as typed, flags left out), `groups` (the story keys of each group, its first story first) and `parallel`, `sequential` or `worker_model` when they were given. It shows the developer one confirmation — the stories, the worker model, the number of workers and a rough token estimate — and starts one background worker per group in its own worktree and port range: at most 3, and never more than the lease\'s concurrent-story limit. Do not implement, verify or complete the handed-out stories in this session: each worker implements and verifies its stories; when a worker\'s verify passed, the extension runs `/holycode-hub:complete <key> <sha> --scope <scope>` here, queues what the Hub hands out and starts workers for it, and asks this session to renew a running worker\'s lease before it expires. When a worker fails, stalls or needs an answer, tell the developer its question or log tail and let them choose: answer it (`holycode_worker_resume` with their words), retry (`holycode_standing_order` `action: "retry"`) or release (`action: "release"` with their reason). `action: "status"` shows the order. When the developer declines the confirmation, ask for one reason and run `/holycode-hub:release <key> <reason>` for each handed-out story.',
+    '',
+  ].join('\n'),
+});
+
+/** A card with the Pi client's addendum, when it has one. */
+export function withAddendum(card: PiCommandFile): PiCommandFile {
+  const addendum = CARD_ADDENDA[card.id];
+  return addendum === undefined ? card : { ...card, body: `${card.body.replace(/\n*$/, '\n')}${addendum}` };
+}
+
+/**
  * The bundled commands plus the cached framework cards. A card never replaces a bundled command
  * of the same name (the package's own command is the reviewed one).
  */
-export function commandsToRegister(bundledDir: string, cardsDir: string): PiCommandFile[] {
+export function commandsToRegister(bundledDir: string, cardsDir: string, addenda = true): PiCommandFile[] {
   const bundled = loadCommandFiles(bundledDir);
   const names = new Set(bundled.map((c) => c.id));
-  return [...bundled, ...loadCommandFiles(cardsDir).filter((card) => !names.has(card.id))];
+  const cards = loadCommandFiles(cardsDir).filter((card) => !names.has(card.id));
+  return [...bundled, ...(addenda ? cards.map(withAddendum) : cards)];
 }

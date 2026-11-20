@@ -21,21 +21,37 @@
 //  - `/holycode-hub:models`: add, use, test and remove the developer's own models (HH-603); every
 //    Hub command stops with one line naming it while no model is set.
 //  - `/holycode-hub:login`: signs in again (HH-596).
+//  - Background workers (HH-670): holycode_worker_start / _status / _resume / _stop run separate Pi
+//    sessions in story worktrees (registry in `~/.holycode-hub/pi/workers/`), a 30-minute stall
+//    watchdog, an optional `--worker-timeout <minutes>` hard limit, and a notice in this session when
+//    a worker finishes, fails, stalls or needs an answer. A worker itself gets no worker tools.
+//  - Parallel standing orders (HH-671): holycode_standing_order and the Pi addendum of the
+//    execute-work card. The coordinator session claims once; one confirmation starts one worker per
+//    group; a worker's passed verify makes this session run complete --scope; the stories the Hub
+//    hands out then get workers; a running worker's lease is renewed here before it expires.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { commandsToRegister, expandArguments, type PiCommandFile } from '../src/commands';
 import { askTool, subagentTool } from '../src/agent-tools';
 import { claudeToolName, effortGuardReason, recordAssistantUsage, recordEvent, type AssistantUsage } from '../src/effort';
-import { tagClientKind } from '../src/hub-calls';
+import { piToolName, tagClientKind } from '../src/hub-calls';
 import { ensureHubServer, piAgentDir } from '../src/hub-server';
 import { needsSignIn, signIn } from '../src/login';
 import { NO_MODEL_LINE, runModelsCommand } from '../src/models';
+import { readRecommended } from '../src/recommended-models';
+import { createCoordinator } from '../src/standing-order-setup';
+import { standingOrderTool } from '../src/standing-order-tool';
 import { modelsListStale, savedTier, saveWorkModelsResult } from '../src/model-tier';
 import type { PiApi, PiContext, PiToolCallEvent, PiToolResultEvent } from '../src/pi-types';
 import { COMMAND_PREFIX } from '../src/render.mjs';
 import { installRuntime, piRuntimeDir } from '../src/runtime';
 import { sessionBanner } from '../src/session-banner';
+import type { StandingOrderCoordinator } from '../src/standing-order';
+import { WORKER_ENV } from '../src/worker-process';
+import { claimLimitOf, WorkerRegistry, workersDir } from '../src/worker-registry';
+import { WORKER_TIMEOUT_FLAG, workerTools } from '../src/worker-tools';
+import { WorkerManager, type Notify } from '../src/workers';
 import { applyHook as renewWorktreeLease } from '../scripts/story-worktree.mjs';
 
 /** The custom message type the banner joins the conversation with. */
@@ -43,6 +59,12 @@ export const BANNER_TYPE = 'holycode-hub-session';
 
 export const LOGIN_COMMAND = 'holycode-hub:login';
 export const MODELS_COMMAND = 'holycode-hub:models';
+
+/** The custom message type a worker notice joins the conversation with (HH-670). */
+export const WORKER_NOTICE_TYPE = 'holycode-hub-worker';
+
+/** How often the stall watchdog looks at the running workers. */
+export const WATCHDOG_INTERVAL_MS = 60_000;
 
 /** The first-session sign-in offer still running, if any (the tests wait on it). */
 export let pendingSignInOffer: Promise<void> = Promise.resolve();
@@ -66,6 +88,27 @@ async function offerSignIn(pi: PiApi, ctx: PiContext): Promise<void> {
   ctx.ui.notify(result.message, result.ok ? 'info' : 'error');
 }
 
+/**
+ * A worker notice (HH-670): a Pi notice in the coordinator session, and a message that joins its
+ * conversation once the current turn ends (an idle session keeps it for the next turn).
+ */
+export function workerNotice(pi: PiApi, context: () => PiContext | undefined): Notify {
+  return (message, level) => {
+    context()?.ui.notify(message, level);
+    pi.sendMessage({ customType: WORKER_NOTICE_TYPE, content: message, display: true }, { deliverAs: 'followUp' });
+  };
+}
+
+/** HH-671 — the coordinator follows this session's standing-order claim and each completion it runs. */
+function followStandingOrder(coordinator: StandingOrderCoordinator, result: PiToolResultEvent): void {
+  try {
+    if (result.toolName === piToolName('work_complete')) coordinator.onComplete(result.input, result.content, result.isError === true);
+    if (result.toolName === piToolName('work_claim') && result.isError !== true) coordinator.noteClaim(result.input, result.content);
+  } catch {
+    // A standing order that cannot be read never fails the Hub call it follows.
+  }
+}
+
 function registerHubCommand(pi: PiApi, command: PiCommandFile): void {
   pi.registerCommand(`${COMMAND_PREFIX}${command.id}`, {
     description: command.description,
@@ -85,12 +128,27 @@ export default function holycodeHub(pi: PiApi): void {
   const added = ensureHubServer(piAgentDir());
   const runtimeDir = piRuntimeDir();
   installRuntime(PACKAGE_ROOT, runtimeDir);
-  for (const command of commandsToRegister(path.join(PACKAGE_ROOT, 'commands'), path.join(runtimeDir, 'commands-cache'))) {
-    registerHubCommand(pi, command);
-  }
+  const isWorker = (process.env[WORKER_ENV] ?? '') !== '';
+  // A worker never coordinates a standing order, so it gets the Hub's cards without the Pi addenda.
+  const commands = commandsToRegister(path.join(PACKAGE_ROOT, 'commands'), path.join(runtimeDir, 'commands-cache'), !isWorker);
+  for (const command of commands) registerHubCommand(pi, command);
 
-  pi.registerTool(subagentTool(pi));
+  pi.registerTool(subagentTool());
   pi.registerTool(askTool());
+
+  const registry = new WorkerRegistry(workersDir(runtimeDir));
+  let noticeContext: PiContext | undefined;
+  const notify = workerNotice(pi, () => noticeContext);
+  const leaseLimit = (): number | null => registry.savedLeaseLimit();
+  // The coordinator hears every finished run; it is created right after the manager it drives.
+  const manager = new WorkerManager({ registry, notify, onFinish: (record) => coordinator.onWorkerFinished(record), onStall: (record) => coordinator.onWorkerStalled(record) });
+  const coordinator = createCoordinator({ pi, manager, notify, commands, context: () => noticeContext, runtimeDir, agentDir: piAgentDir(), commandsDir: path.join(PACKAGE_ROOT, 'commands'), leaseLimit });
+  let watchdog: NodeJS.Timeout | undefined;
+  if (!isWorker) {
+    pi.registerFlag?.(WORKER_TIMEOUT_FLAG, { description: 'Hard limit in minutes for each background worker run (off by default)', type: 'string', default: '' });
+    for (const tool of workerTools({ pi, manager, registry, agentDir: piAgentDir() })) pi.registerTool(tool);
+    pi.registerTool(standingOrderTool({ pi, coordinator, leaseLimit, recommended: () => readRecommended(runtimeDir, PACKAGE_ROOT) }));
+  }
 
   pi.on('tool_call', (event, ctx) => {
     const call = event as PiToolCallEvent;
@@ -101,7 +159,14 @@ export default function holycodeHub(pi: PiApi): void {
 
   pi.on('input', (_event, ctx) => recordEvent(ctx.cwd, { hook_event_name: 'UserPromptSubmit', prompt: '' }));
   pi.on('agent_settled', (_event, ctx) => recordEvent(ctx.cwd, { hook_event_name: 'Stop' }));
-  pi.on('session_shutdown', (_event, ctx) => recordEvent(ctx.cwd, { hook_event_name: 'SessionEnd' }));
+  pi.on('session_shutdown', (event, ctx) => {
+    recordEvent(ctx.cwd, { hook_event_name: 'SessionEnd' });
+    if ((event as { reason?: string }).reason !== 'quit') return;
+    // Pi is closing: its workers' pipes close with it, so stop them cleanly (resumable later).
+    if (watchdog !== undefined) clearInterval(watchdog);
+    watchdog = undefined;
+    manager.shutdown();
+  });
   pi.on('ui_prompt_start', (_event, ctx) => recordEvent(ctx.cwd, { hook_event_name: 'PreToolUse', tool_name: 'AskUserQuestion' }));
   pi.on('ui_prompt_end', (_event, ctx) => recordEvent(ctx.cwd, { hook_event_name: 'PostToolUse', tool_name: 'AskUserQuestion' }));
   pi.on('message_end', (event, ctx) => recordAssistantUsage(ctx.cwd, piAgentDir(), (event as { message?: AssistantUsage }).message ?? {}));
@@ -115,11 +180,18 @@ export default function holycodeHub(pi: PiApi): void {
       tool_response: { content: result.content ?? [] },
       tool_failed: result.isError === true,
     });
+    if (!isWorker) followStandingOrder(coordinator, result);
     if (result.isError === true) return;
     try {
       saveWorkModelsResult(runtimeDir, result.toolName, result.content);
     } catch {
       // A list that cannot be written keeps the previous one; the Hub call still succeeded.
+    }
+    try {
+      const limit = result.toolName === piToolName('work_claim') ? claimLimitOf(result.content) : undefined;
+      if (limit !== undefined) registry.saveLeaseLimit(limit);
+    } catch {
+      // The workers fall back to their own cap of 3; the claim still succeeded.
     }
     try {
       renewWorktreeLease(ctx.cwd, { tool_name: result.toolName, tool_input: result.input });
@@ -129,6 +201,15 @@ export default function holycodeHub(pi: PiApi): void {
   });
 
   pi.on('session_start', async (event, ctx) => {
+    noticeContext = ctx;
+    if (!isWorker && watchdog === undefined) {
+      watchdog = setInterval(() => {
+        manager.sweep();
+        coordinator.renewLeases();
+        coordinator.fill();
+      }, WATCHDOG_INTERVAL_MS);
+      watchdog.unref?.();
+    }
     const banner = sessionBanner({
       cwd: ctx.cwd,
       shippedBlock: path.join(PACKAGE_ROOT, 'agents', 'hub-workflow-section.md'),

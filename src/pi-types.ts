@@ -34,6 +34,8 @@ export interface PiContext {
   /** The active model, when one is set. */
   readonly model?: PiModel;
   readonly modelRegistry?: PiModelRegistry;
+  /** Whether Pi trusts this project's local files (HH-670); absent in older Pi versions. */
+  isProjectTrusted?(): boolean;
 }
 
 /** The result of `pi.exec` — a command run without a shell. */
@@ -97,4 +99,7 @@ export interface PiApi {
   exec(command: string, args: readonly string[], options?: { timeout?: number; cwd?: string }): Promise<PiExecResult>;
   sendUserMessage(content: string, options?: { deliverAs?: 'steer' | 'followUp' }): void;
   sendMessage(message: PiCustomMessage, options?: { deliverAs?: 'steer' | 'followUp' | 'nextTurn' }): void;
+  /** A command-line flag the extension adds (`pi --<name> <value>`), HH-670. */
+  registerFlag?(name: string, options: { description: string; type: 'boolean' | 'string'; default?: boolean | string }): void;
+  getFlag?(name: string): boolean | string | undefined;
 }

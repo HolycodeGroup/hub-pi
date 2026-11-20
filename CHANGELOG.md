@@ -2,6 +2,30 @@
 
 The Pi package has its own version line and never shares a release with the Claude Code plugin.
 
+## [0.2.2]
+
+### Added
+
+- **Background workers (HH-670).** Four new tools — `holycode_worker_start`, `holycode_worker_status`,
+  `holycode_worker_resume` and `holycode_worker_stop` — run separate Pi sessions in story worktrees,
+  with the Hub tools available, without blocking your session. Workers are tracked in
+  `~/.holycode-hub/pi/workers/` (`RUNNING`, `NEEDS_INPUT`, `STALLED`, `DONE`, `FAILED`, `STOPPED`;
+  output in `<key>.log`), show a notice when they finish, fail, stall or need an answer, and resume
+  their saved session with your answer. At most 3 run at once, never more than the lease's
+  concurrent limit; a worker that would reach another Hub than your session is refused.
+- **No fixed time limit for helpers (HH-670).** Workers and `holycode_subagent` have no fixed time
+  limit any more: one quiet for 30 minutes is reported as stalled and never killed.
+  `pi --worker-timeout <minutes>` sets an optional hard limit for workers.
+- **Parallel standing orders (HH-671).** `/holycode-hub:execute-work phase|epic <name>` (or several
+  story keys) now runs the handed-out stories in parallel through background workers: your session
+  claims once, groups the stories per the `parallel-worktrees` guidance and, after one confirmation
+  (stories, worker model, workers at once, a rough token estimate), starts one worker per group — at
+  most 3, never more than the lease's limit; `--parallel=N` and `--sequential` keep their meaning.
+  Workers implement, open a PR and verify; when a verify passed your session runs `complete --scope`,
+  queues what the Hub hands out and starts workers for it. Each worker gets its own port range
+  (`HUB_WORKER_PORT_BASE`). New tool `holycode_standing_order` (`start`, `status`, `retry`,
+  `release`); `--worker-model <provider/model>` runs the workers on another allowed model.
+
 ## [0.2.1]
 
 - `/holycode-hub:models use <model> --project` now switches the model for this session as well as
