@@ -7,6 +7,20 @@ export interface PiUi {
   notify(message: string, level?: 'info' | 'warning' | 'error'): void;
   confirm(title: string, message: string): Promise<boolean>;
   select(title: string, options: string[]): Promise<string | undefined>;
+  input(title: string, placeholder?: string): Promise<string | undefined>;
+}
+
+/** A model in Pi's catalogue (the fields this package reads). */
+export interface PiModel {
+  readonly provider: string;
+  readonly id: string;
+  readonly baseUrl?: string;
+}
+
+/** Pi's model catalogue (`ctx.modelRegistry`): every model, and those with usable credentials. */
+export interface PiModelRegistry {
+  getAvailable(): PiModel[];
+  getAll?(): PiModel[];
 }
 
 /** What Pi passes to an event handler or a command (`ExtensionContext`). */
@@ -18,7 +32,8 @@ export interface PiContext {
   /** True when no agent turn is running. */
   isIdle(): boolean;
   /** The active model, when one is set. */
-  readonly model?: { readonly provider: string; readonly id: string };
+  readonly model?: PiModel;
+  readonly modelRegistry?: PiModelRegistry;
 }
 
 /** The result of `pi.exec` — a command run without a shell. */
@@ -78,6 +93,7 @@ export interface PiApi {
   on(event: string, handler: (event: unknown, ctx: PiContext) => unknown): void;
   registerCommand(name: string, command: PiCommand): void;
   registerTool(tool: PiTool): void;
+  setModel(model: PiModel): Promise<boolean>;
   exec(command: string, args: readonly string[], options?: { timeout?: number; cwd?: string }): Promise<PiExecResult>;
   sendUserMessage(content: string, options?: { deliverAs?: 'steer' | 'followUp' }): void;
   sendMessage(message: PiCustomMessage, options?: { deliverAs?: 'steer' | 'followUp' | 'nextTurn' }): void;

@@ -16,6 +16,8 @@
 //    work_complete call that leaves the measured effort out is refused once, naming the fields.
 //  - Two tools for the model (HH-601): holycode_subagent (a fresh-context helper run) and
 //    holycode_ask (a choice dialog, plain numbered text without a UI).
+//  - `/holycode-hub:models`: add, use, test and remove the developer's own models (HH-603); every
+//    Hub command stops with one line naming it while no model is set.
 //  - `/holycode-hub:login`: signs in again (HH-596).
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,6 +28,7 @@ import { claudeToolName, effortGuardReason, recordAssistantUsage, recordEvent, t
 import { tagClientKind } from '../src/hub-calls';
 import { ensureHubServer, piAgentDir } from '../src/hub-server';
 import { needsSignIn, signIn } from '../src/login';
+import { NO_MODEL_LINE, runModelsCommand } from '../src/models';
 import { savedTier } from '../src/model-tier';
 import type { PiApi, PiContext, PiToolCallEvent, PiToolResultEvent } from '../src/pi-types';
 import { COMMAND_PREFIX } from '../src/render.mjs';
@@ -37,6 +40,7 @@ import { applyHook as renewWorktreeLease } from '../scripts/story-worktree.mjs';
 export const BANNER_TYPE = 'holycode-hub-session';
 
 export const LOGIN_COMMAND = 'holycode-hub:login';
+export const MODELS_COMMAND = 'holycode-hub:models';
 
 /** The first-session sign-in offer still running, if any (the tests wait on it). */
 export let pendingSignInOffer: Promise<void> = Promise.resolve();
@@ -64,6 +68,10 @@ function registerHubCommand(pi: PiApi, command: PiCommandFile): void {
   pi.registerCommand(`${COMMAND_PREFIX}${command.id}`, {
     description: command.description,
     async handler(args, ctx) {
+      if (ctx.model === undefined) {
+        ctx.ui.notify(NO_MODEL_LINE, 'warning');
+        return;
+      }
       const text = expandArguments(command.body, args);
       if (ctx.isIdle()) pi.sendUserMessage(text);
       else pi.sendUserMessage(text, { deliverAs: 'followUp' });
@@ -130,6 +138,13 @@ export default function holycodeHub(pi: PiApi): void {
     // Not awaited: the session starts at once and the question appears beside it. A slow or
     // missing `pi` binary never stops the session; the command stays available.
     pendingSignInOffer = offerSignIn(pi, ctx).catch(() => undefined);
+  });
+
+  pi.registerCommand(MODELS_COMMAND, {
+    description: 'Add, use, test or remove your own model (any provider in Pi; keys stay on this machine)',
+    async handler(args, ctx) {
+      await runModelsCommand(pi, args, ctx, { agentDir: piAgentDir(), runtimeDir, packageRoot: PACKAGE_ROOT });
+    },
   });
 
   pi.registerCommand(LOGIN_COMMAND, {

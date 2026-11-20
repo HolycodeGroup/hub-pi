@@ -1,0 +1,40 @@
+{
+  "version": "2026-11-20.1",
+  "models": [
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-5-5",
+      "tier": "SUPPORTED",
+      "notes": "The model the Claude Code client runs on; certification through the Pi client is pending (HH-607).",
+      "settings": { "thinking": "medium" }
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-5-5",
+      "tier": "SUPPORTED",
+      "notes": "The most capable Claude model; certification through the Pi client is pending (HH-607).",
+      "settings": { "thinking": "medium" }
+    },
+    {
+      "provider": "fireworks",
+      "model": "kimi-k2",
+      "tier": "EXPERIMENTAL",
+      "notes": "Open-weight; not yet measured on the eval set (HH-607).",
+      "settings": {}
+    },
+    {
+      "provider": "fireworks",
+      "model": "glm-4.6",
+      "tier": "EXPERIMENTAL",
+      "notes": "Open-weight; not yet measured on the eval set (HH-607).",
+      "settings": {}
+    },
+    {
+      "provider": "fireworks",
+      "model": "qwen3-coder",
+      "tier": "EXPERIMENTAL",
+      "notes": "Open-weight; not yet measured on the eval set (HH-607).",
+      "settings": {}
+    }
+  ]
+}
