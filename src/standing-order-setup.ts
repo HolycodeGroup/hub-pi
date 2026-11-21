@@ -11,7 +11,7 @@ import { prepareWorktree } from './worker-setup';
 import type { Notify, WorkerManager } from './workers';
 import { create as createStoryWorktree, loadRegistry, repoOf } from '../scripts/story-worktree.mjs';
 
-type CreateWorktree = (cwd: string, input: { key: string; title: string; type: string; limit: number | null; group: string | null }) => WorktreeResult;
+type CreateWorktree = (cwd: string, input: { key: string; title: string; type: string; limit: number | null; group: string | null; tool: string }) => WorktreeResult & { readonly warning?: string };
 
 /** story-worktree.mjs `create`, typed (the script's defaults make TypeScript infer `null` only). */
 const createWorktree = createStoryWorktree as unknown as CreateWorktree;
@@ -57,7 +57,10 @@ export function createCoordinator(setup: CoordinatorSetup): StandingOrderCoordin
     notify: setup.notify,
     createWorktree: ({ key, title, group }) => {
       try {
-        return createWorktree(cwd(), { key, title, type: 'feat', limit: setup.leaseLimit(), group });
+        // HH-679 — a worker never starts silently in a worktree where Claude Code still works.
+        const result = createWorktree(cwd(), { key, title, type: 'feat', limit: setup.leaseLimit(), group, tool: 'pi' });
+        if (result.ok && result.warning !== undefined) setup.notify(`${key}: ${result.warning}`, 'warning');
+        return result;
       } catch (error) {
         return { ok: false, reason: error instanceof Error ? error.message : String(error) };
       }

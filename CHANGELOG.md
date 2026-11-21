@@ -2,6 +2,37 @@
 
 The Pi package has its own version line and never shares a release with the Claude Code plugin.
 
+## [0.2.4]
+
+### Added
+
+- **A warning when Pi and Claude Code work in the same folder (HH-679).** Each Pi session keeps a small
+  marker for its folder in the repository's git directory (tool, process id, host, start and heartbeat
+  times — no prompt text, code or credential, never sent to the Hub), written at session start,
+  refreshed by prompts, turns and tool results and removed at shutdown. A session start in a folder
+  where a live Claude Code session works says so in the banner and as a notice, and
+  `/holycode-hub:claim` of a story whose worktree Claude Code works in shows the warning and asks
+  Continue anyway / Stop — before anything is claimed when a story key is given (Stop then ends the
+  command with no Hub call and nothing changed); a standing order names the story in a warning notice
+  before its worker starts there. Markers of a stopped process, older
+  than 10 minutes or from another machine are ignored and replaced. The effort buffer shared with
+  Claude Code is written through a temp file and a rename.
+- **A warning when Pi and Claude Code use different Hubs for one repository (HH-680).** The session
+  start records the Hub URL Pi resolves for the repository (`<git dir>/holycode-hub/hub.json` — URL,
+  tool and time only, never a token, never sent to the Hub) and, when Claude Code last recorded another
+  Hub there, says which tool uses which Hub, that claims made in one are not visible in the other, and
+  the fix for each tool (`.pi/mcp.json` or `pi mcp add -l holycode-hub --url …`; the Claude Code
+  plugin's holycode-hub server URL). A record older than 30 days is ignored.
+
+### Fixed
+
+- **Effort measured in Pi in a second clone or on another computer is no longer lost (HH-681).** When a
+  story's lease runs out in this folder's effort buffer (for example because the story was completed
+  from another clone), its measured time and token counts are kept for 7 days, and each session start
+  asks the model, in a hidden message, for one quiet `work_progress` call per story with pending effort.
+  The Hub accepts it from the person who completed the story for 7 days and never counts the same time
+  twice; a refusal drops that story's effort from the buffer quietly.
+
 ## [0.2.3]
 
 ### Fixed

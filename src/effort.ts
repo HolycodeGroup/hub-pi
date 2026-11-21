@@ -10,13 +10,26 @@
 //   a tool finished (`tool_result`)   → PostToolUse        (Pi's bash/edit/write named as Claude Code's)
 //   an assistant message ends         → its token counts, as `provider/model`, with how it is paid for
 //
+//   session starts (`session_start`)  → the quiet send of unsent effort (HH-681, below)
+//
 // Only timestamps, actor, category, model ids and token counts are kept — never prompt text, tool
 // input beyond what the engine reads to name the step, code or file content.
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { absorbTranscript, applyEvent, attachEffort, loadState, saveState, stateFileFor } from '../scripts/effort-core.mjs';
+import {
+  absorbTranscript,
+  applyEvent,
+  attachEffort,
+  loadState,
+  pointerProjectId,
+  projectRootFor,
+  saveState,
+  sessionStartNote,
+  sessionStartSends,
+  stateFileFor,
+} from '../scripts/effort-core.mjs';
 
 type Source = 'API_KEY' | 'SUBSCRIPTION' | 'UNKNOWN';
 
@@ -128,6 +141,33 @@ export function effortGuardReason(cwd: string, toolName: string, input: Record<s
       }
       const drop = ['human_ms', 'ai_ms'].filter((field) => field in input && !(field in next));
       return `holycode-hub: this call leaves out the measured effort. Call it again with these fields added${drop.length > 0 ? ` and without ${drop.join(' / ')}` : ''} (counts and timestamps only): ${JSON.stringify(add)}`;
+    });
+  } catch {
+    return null;
+  }
+}
+
+interface SessionStartSend {
+  key: string;
+  input: { story_id: string; segments?: unknown[]; model_usage?: { model: string; source: string }[] };
+}
+
+/**
+ * HH-681 — effort measured in this folder that has not reached the Hub (a story completed from another
+ * clone or computer, or simply not sent yet): the hidden note asking the model for one quiet
+ * work_progress call per story, each model's usage with the source Pi recorded for it — or null when
+ * there is nothing to send. The extension cannot call the Hub itself (Pi's MCP adapter serves the
+ * model), so the call is the model's. Never throws.
+ */
+export function sessionStartEffortNote(cwd: string, now: number = Date.now()): string | null {
+  try {
+    return withState(cwd, (state) => {
+      const sources = state.usage.piSources ?? {};
+      const sends = (sessionStartSends(state as never, now, 'UNKNOWN') as SessionStartSend[]).map(({ key, input }) => ({
+        key,
+        input: input.model_usage === undefined ? input : { ...input, model_usage: input.model_usage.map((entry) => ({ ...entry, source: sources[entry.model] ?? 'UNKNOWN' })) },
+      }));
+      return sessionStartNote(sends as never, pointerProjectId(projectRootFor(cwd) as string) as string | null) as string | null;
     });
   } catch {
     return null;

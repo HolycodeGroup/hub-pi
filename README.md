@@ -116,6 +116,24 @@ so Claude Code, is unchanged, and a worker gets the card without it.
 - The order lives in `~/.holycode-hub/pi/standing-order.json`; the watchdog asks the coordinator to
   renew a running worker's lease within the hour before it expires.
 
+## Switching between Pi and Claude Code
+
+Pi and Claude Code can work on the same repository, but never in the same folder at the same time:
+two tools editing the same files overwrite each other. Both clients keep a small marker per running
+session in the repository's git directory (`<git-common-dir>/holycode-hub/sessions/`: tool, process
+id, host, start and heartbeat times — no prompt text, code or credential, never sent to the Hub). Pi
+writes it at session start, refreshes it with every prompt, turn and tool result and removes it at
+shutdown (HH-679). When Claude Code has a live session in the folder Pi starts in, the banner and a
+notice say so; `/holycode-hub:claim` of a story whose worktree Claude Code works in asks Continue
+anyway / Stop first. A marker of a stopped process, older than 10 minutes or from another machine is
+ignored and deleted.
+
+The session start also records the Hub URL Pi uses for the repository in
+`<git-common-dir>/holycode-hub/hub.json` (the URL only) and warns, with the fix for each tool, when
+Claude Code recorded another Hub there in the last 30 days (HH-680). The shared code is
+`scripts/tool-sessions.mjs`, a byte copy of `hub-client-core`'s (the Claude Code plugin's hooks run
+the same file).
+
 ## Use staging or a local Hub in one project
 
 A project entry in `.pi/mcp.json` replaces the user-level one for that project only. Pi reads it

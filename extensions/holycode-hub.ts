@@ -23,6 +23,8 @@
 //  - Effort on the held story (HH-600): Pi's events feed the Claude Code effort engine (human / AI
 //    time, steps, token counts per provider/model), and a work_progress / work_verify /
 //    work_complete call that leaves the measured effort out is refused once, naming the fields.
+//    HH-681: at session start, effort still unsent in this folder (a story completed from another
+//    clone or computer) is asked of the model as one quiet work_progress call per story (hidden).
 //  - Two tools for the model (HH-601): holycode_subagent (a fresh-context helper run) and
 //    holycode_ask (a choice dialog, plain numbered text without a UI).
 //  - `/holycode-hub:models`: add, use, test and remove the developer's own models (HH-603); every
@@ -35,6 +37,10 @@
 //    sessions in story worktrees (registry in `~/.holycode-hub/pi/workers/`), a 30-minute stall
 //    watchdog, an optional `--worker-timeout <minutes>` hard limit, and a notice in this session when
 //    a worker finishes, fails, stalls or needs an answer. A worker itself gets no worker tools.
+//  - Switching between Claude Code and Pi (HH-679, HH-680): a session marker for this folder in the
+//    repository's git directory (written at session start, refreshed by prompts, turns and tool
+//    results, removed at shutdown) and the Hub URL this repository uses; the session start warns
+//    when Claude Code works in the same folder or uses another Hub. Nothing of it leaves the machine.
 //  - Parallel standing orders (HH-671): holycode_standing_order and the Pi addendum of the
 //    execute-work card. The coordinator session claims once; one confirmation starts one worker per
 //    group; a worker's passed verify makes this session run complete --scope; the stories the Hub
@@ -45,7 +51,7 @@ import { fileURLToPath } from 'node:url';
 import { commandsToRegister, expandArguments, type PiCommandFile } from '../src/commands';
 import { askTool, subagentTool } from '../src/agent-tools';
 import { copyIntoClaimedWorktree } from '../src/claim-worktree';
-import { claudeToolName, effortGuardReason, recordAssistantUsage, recordEvent, type AssistantUsage } from '../src/effort';
+import { claudeToolName, effortGuardReason, recordAssistantUsage, recordEvent, sessionStartEffortNote, type AssistantUsage } from '../src/effort';
 import { piToolName, tagClientKind } from '../src/hub-calls';
 import { applyHubDeltas } from '../src/hub-deltas';
 import { ensureHubServer, piAgentDir } from '../src/hub-server';
@@ -66,6 +72,7 @@ import { WORKER_ENV } from '../src/worker-process';
 import { claimLimitOf, WorkerRegistry, workersDir } from '../src/worker-registry';
 import { WORKER_TIMEOUT_FLAG, workerTools } from '../src/worker-tools';
 import { WorkerManager, type Notify } from '../src/workers';
+import { beat, endSession, switchingWarnings } from '../src/tool-switch';
 import { applyHook as renewWorktreeLease } from '../scripts/story-worktree.mjs';
 
 /** The custom message type the banner joins the conversation with. */
@@ -73,6 +80,9 @@ export const BANNER_TYPE = 'holycode-hub-session';
 
 export const LOGIN_COMMAND = 'holycode-hub:login';
 export const MODELS_COMMAND = 'holycode-hub:models';
+
+/** The custom message type the quiet send of unsent effort joins the conversation with, hidden (HH-681). */
+export const EFFORT_NOTE_TYPE = 'holycode-hub-effort';
 
 /** The custom message type a worker notice joins the conversation with (HH-670). */
 export const WORKER_NOTICE_TYPE = 'holycode-hub-worker';
@@ -196,9 +206,16 @@ export default function holycodeHub(pi: PiApi): void {
     return reason === null ? undefined : { block: true, reason };
   });
 
-  pi.on('input', (_event, ctx) => recordEvent(ctx.cwd, { hook_event_name: 'UserPromptSubmit', prompt: '' }));
-  pi.on('agent_settled', (_event, ctx) => recordEvent(ctx.cwd, { hook_event_name: 'Stop' }));
+  pi.on('input', (_event, ctx) => {
+    beat(ctx.cwd);
+    recordEvent(ctx.cwd, { hook_event_name: 'UserPromptSubmit', prompt: '' });
+  });
+  pi.on('agent_settled', (_event, ctx) => {
+    beat(ctx.cwd);
+    recordEvent(ctx.cwd, { hook_event_name: 'Stop' });
+  });
   pi.on('session_shutdown', (event, ctx) => {
+    endSession(ctx.cwd);
     recordEvent(ctx.cwd, { hook_event_name: 'SessionEnd' });
     if ((event as { reason?: string }).reason !== 'quit') return;
     // Pi is closing: its workers' pipes close with it, so stop them cleanly (resumable later).
@@ -220,6 +237,7 @@ export default function holycodeHub(pi: PiApi): void {
     // The deltas are applied first, so every reader below sees the whole result (not Pi's 20 KB cut).
     const patch = applyDeltas(original, runtimeDir, ctx.cwd);
     const result: PiToolResultEvent = patch === undefined ? original : { ...original, content: patch.content };
+    beat(ctx.cwd);
     recordEvent(ctx.cwd, {
       hook_event_name: 'PostToolUse',
       tool_name: claudeToolName(result.toolName),
@@ -272,8 +290,14 @@ export default function holycodeHub(pi: PiApi): void {
       tier: ctx.model === undefined ? 'UNKNOWN' : savedTier(runtimeDir, ctx.model.provider, ctx.model.id),
       refreshModels: modelsListStale(runtimeDir),
     });
-    pi.sendMessage({ customType: BANNER_TYPE, content: banner.join('\n'), display: true }, { deliverAs: 'nextTurn' });
+    const switching = switchingWarnings(ctx.cwd, hubCheck.hub.url);
+    pi.sendMessage({ customType: BANNER_TYPE, content: [...banner, ...switching].join('\n'), display: true }, { deliverAs: 'nextTurn' });
+    // HH-681 — effort still unsent here (e.g. the story was completed from another clone): one quiet
+    // work_progress per story, asked of the model in a hidden message; nothing shows unless it fails.
+    const effortNote = sessionStartEffortNote(ctx.cwd);
+    if (effortNote !== null) pi.sendMessage({ customType: EFFORT_NOTE_TYPE, content: effortNote, display: false }, { deliverAs: 'nextTurn' });
     if (hubCheck.expected !== undefined) ctx.ui.notify(hubWarning(hubCheck), 'warning');
+    if (switching.length > 0) ctx.ui.notify(switching.join('\n'), 'warning');
     if ((event as { reason?: string }).reason !== 'startup') return;
     if (added === 'added') ctx.ui.notify('Rapid Dev Hub server added to Pi. Run /reload if its tools do not appear.', 'info');
     if (added === 'unreadable') {

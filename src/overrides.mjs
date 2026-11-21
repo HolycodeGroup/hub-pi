@@ -46,6 +46,11 @@ export const WORDING_OVERRIDES = Object.freeze([
     why: 'Pi reloads its extensions in place',
   },
   {
+    find: '--tool claude-code`',
+    replace: '--tool pi`',
+    why: 'HH-679: the worktree script names the calling client, so the warning names the other one (Claude Code)',
+  },
+  {
     find: 'Pipe the JSON of `result.directive.rule_deltas` into `node "$HOME/.holycode-hub/pi/scripts/apply-rule-deltas.mjs" --project-root "$PWD"` (stdin) and report its one-line summary; a non-zero exit means a delta was refused or a project file was skipped as an unsynced local edit (`project.conflicts`)',
     replace: 'The Hub extension has already applied `result.directive.rule_deltas` to this repository\'s `.project-management/rules/` and left its one-line summary in that field (`applied by the extension: …`) — report the summary; never pipe or copy deltas yourself. `refused` above 0, any `conflicts` (a project file skipped as an unsynced local edit) or `not applied by the extension` means a delta did not land',
     why: 'HH-673: the Pi extension applies the deltas as the result comes back, so the payload never passes through the model',
