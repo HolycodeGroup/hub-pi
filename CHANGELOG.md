@@ -2,6 +2,21 @@
 
 The Pi package has its own version line and never shares a release with the Claude Code plugin.
 
+## [0.2.3]
+
+### Fixed
+
+- **The session names the Hub it talks to, and warns when a staging override is lost (HH-672).** Every
+  session start shows the Hub host and whether the project's `.pi/mcp.json` or the global Pi config sets
+  it; `/holycode-hub:login` and the first-run sign-in name the host before the browser opens. The last
+  Hub URL is remembered per repository in `~/.holycode-hub/pi/last-hub.json` (the URL only). A repository
+  that last used a non-production Hub and now resolves to another one gets a loud warning with the fix —
+  restore `.pi/mcp.json`, or `pi mcp add -l holycode-hub --url <last url>` — and no sign-in offer for the
+  other Hub. After `/holycode-hub:claim` creates the story worktree, the extension copies `.pi/mcp.json` and
+  only the model fields of `.pi/settings.json` into it, and the docs recommend keeping `.pi/` out of commits via
+  `.git/info/exclude`.
+- **Sync and claim no longer break on Fireworks with 400 "missing field `content`" (HH-673).** The extension now applies the command cards, guidance and project rule files a `work_sync` / `work_claim` result carries itself and gives the model one summary line per delta (`applied by the extension: written 7, …`), so the payload never passes through the model; `/holycode-hub:sync-commands`, `/holycode-hub:claim` and `/holycode-hub:update` report that summary instead of piping JSON into a script. Unsynced local edits of project rules are still never overwritten. Before each model request the extension also folds the content-less message Pi sends for a tool added mid-session (Kimi K3.1 Pro on Fireworks after a `/reload`) back into the request's tool list, which Fireworks refused.
+
 ## [0.2.2]
 
 ### Added

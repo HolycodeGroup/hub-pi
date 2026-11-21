@@ -51,7 +51,12 @@ node packages/client-pi/tools/sync-from-core.mjs
 On load the extension copies the scripts the commands run, the `AGENTS.md` Hub block and the package
 version to `~/.holycode-hub/pi/`; the framework cards the Hub delivers (`/holycode-hub:sync-commands`)
 land in `~/.holycode-hub/pi/commands-cache/` and become commands after `/reload`. Every Hub
-`work_sync` and `work_claim` call carries `client_kind: "pi"`.
+`work_sync` and `work_claim` call carries `client_kind: "pi"`. The extension applies the command,
+guidance and project rule deltas of their results itself (the apply scripts' logic, imported) and
+replaces each delta with a one-line summary before the model sees the result, so the payload never
+passes through the model (HH-673). Before each model request it also folds a message without
+`content` — Pi's form for tools added mid-session, which Fireworks refuses — back into the request's
+tool list.
 
 ## Background workers
 
@@ -123,11 +128,39 @@ only after you trust the project.
    pi mcp add -l holycode-hub --url https://<staging-hub-host>/mcp
    ```
 
-   This writes `.pi/mcp.json`. Decide whether your team commits it; it holds no secret.
+   This writes `.pi/mcp.json`. It holds no secret, but keep it out of commits unless your team
+   decides to share it: a `.pi/` folder that lives on one branch disappears when you switch to a
+   branch without it, and Pi then falls back to the production Hub. Exclude it locally (never
+   committed, unlike `.gitignore`):
+
+   ```bash
+   echo '.pi/' >> .git/info/exclude
+   ```
+
+   An untracked `.pi/` that is not excluded also stops `/holycode-hub:claim` from creating the story
+   worktree (the main checkout counts as having uncommitted changes).
 2. Start Pi in the project and trust it when asked.
 3. Sign in to that Hub: `/holycode-hub:login`. The override has its own sign-in, because Pi keeps
    one credential per server name and URL.
-4. Check it: `pi mcp list` shows `holycode-hub` connected with the override's URL.
+4. Check it: `pi mcp list` shows `holycode-hub` connected with the override's URL, and the session
+   banner names the Hub: `holycode-hub: Hub <staging-hub-host> (from the project's .pi/mcp.json)`.
+
+**Which Hub am I on?** Every session start names the Hub host and whether the project's
+`.pi/mcp.json` or the global Pi config sets it; `/holycode-hub:login` and the first-run sign-in
+offer name the host before the browser opens. The package remembers the last Hub URL per repository
+(all worktrees of a repository share one entry) in `~/.holycode-hub/pi/last-hub.json` — the URL
+only, never a token. When a repository that last used a non-production Hub now resolves to another
+one (the override was lost), the session start warns loudly, names the fix — restore
+`.pi/mcp.json`, or `pi mcp add -l holycode-hub --url <last url>` — and does not offer the sign-in for
+the other Hub. To switch on purpose, run `/holycode-hub:login`: a finished sign-in makes that Hub
+the remembered one. The warning needs a remembered Hub: a repository whose override was already
+lost before its first session on this version only gets the banner line. In a project Pi does not
+trust, Pi ignores `.pi/mcp.json`; the session start then warns and names trusting the project as the
+fix.
+
+**Story worktrees:** once `/holycode-hub:claim` has created the story worktree, the extension copies the main checkout's `.pi/mcp.json` and only the
+model fields of `.pi/settings.json` (never a key) into the new story worktree, the same as a
+background worker gets.
 
 To go back to the production Hub, remove the override: `pi mcp remove -l holycode-hub`.
 

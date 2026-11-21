@@ -41,9 +41,12 @@ export interface LoginResult {
   readonly message: string;
 }
 
-/** Signs out and in again; the message is what the developer sees. Never throws. */
-export async function signIn(pi: PiApi, cwd: string): Promise<LoginResult> {
-  const [logout, login] = loginInvocations(serverScope(cwd));
+/**
+ * Signs out and in again; the message is what the developer sees. Never throws. `scope` is the
+ * entry the session resolved (HH-672: an untrusted project's override is not the one signed in).
+ */
+export async function signIn(pi: PiApi, cwd: string, scope: ServerScope = serverScope(cwd)): Promise<LoginResult> {
+  const [logout, login] = loginInvocations(scope);
   try {
     await pi.exec('pi', logout as string[], { cwd, timeout: 30_000 });
     const result = await pi.exec('pi', login as string[], { cwd, timeout: (LOGIN_TIMEOUT_SECONDS + 30) * 1000 });

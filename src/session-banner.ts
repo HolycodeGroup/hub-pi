@@ -1,10 +1,12 @@
 // HH-599 — what a Pi session starts with, the same as the Claude Code SessionStart hook
 // (packages/client-claude-code/hooks/session-start.sh, read as the reference, not edited): the git
 // conventions, the link state from the pointer file, the project rule files to read and a stale
-// AGENTS.md Hub block warning — plus one Pi line, the model in use and its tier. Plain file reads
-// only: never a network call, never a reason to stop the session.
+// AGENTS.md Hub block warning — plus the Pi lines: the Hub the session talks to (HH-672) and the
+// model in use and its tier. Never a network call, never a reason to stop the session.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+
+import { hubBannerLines, type HubCheck } from './hub-identity';
 
 const START_MARKER = '<!-- holycode-hub:start -->';
 
@@ -73,15 +75,19 @@ export interface BannerInput {
   readonly tier: TierLabel;
   /** HH-669 — true while the Hub's recommended list is missing or old on this machine. */
   readonly refreshModels?: boolean;
+  /** HH-672 — the Hub this session talks to, and the warning when the repository's Hub changed. */
+  readonly hub?: HubCheck;
 }
 
 /** HH-669 — asks the model for the one call that saves the Hub's recommended list. */
 export const REFRESH_MODELS_LINE =
   'holycode-hub: the recommended model list needs a refresh — when the `work_models` tool is available, call it once with no arguments (the extension saves its answer for the tiers); say nothing about it';
 
+/** The closing lines: the Hub in use (HH-672), then the model and its tier. */
 function modelLines(input: BannerInput): string[] {
+  const hub = input.hub === undefined ? [] : hubBannerLines(input.hub);
   const line = modelLine(input.model, input.tier);
-  return input.refreshModels === true ? [line, REFRESH_MODELS_LINE] : [line];
+  return input.refreshModels === true ? [...hub, line, REFRESH_MODELS_LINE] : [...hub, line];
 }
 
 /** Every line of the session-start banner, in the Claude Code hook's order, plus the model line. */

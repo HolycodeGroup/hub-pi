@@ -54,6 +54,15 @@ function readMcpFile(file: string): McpFile | 'unreadable' {
   }
 }
 
+/** The `holycode-hub` URL a `mcp.json` names, or undefined (no file, no entry, or an override without `url`). */
+export function hubUrlIn(file: string): string | undefined {
+  const parsed = readMcpFile(file);
+  if (parsed === 'unreadable') return undefined;
+  const entry = parsed.mcpServers?.[HUB_SERVER_NAME] as { url?: unknown } | undefined;
+  const url = entry?.url;
+  return typeof url === 'string' && url !== '' ? url : undefined;
+}
+
 /**
  * Adds the `holycode-hub` server to `<agentDir>/mcp.json` when it is missing, keeping every other
  * key and server. Written through a temporary file and a rename, so a crash never leaves half a

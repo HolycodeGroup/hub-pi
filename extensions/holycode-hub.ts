@@ -13,6 +13,13 @@
 //  - After a successful Hub work_models call: saves the answer as the recommended list (HH-669).
 //  - After a successful Hub work_claim / work_progress / work_verify: renews the story worktree's
 //    lease, like the Claude Code worktree hook (HH-599).
+//  - After a successful Hub work_sync / work_claim: applies its command, guidance and project rule
+//    deltas itself and gives the model the result with a one-line summary in their place, so the
+//    payload never passes through the model (HH-673).
+//  - Before each model request: a message without `content` (Pi's mid-conversation tool message,
+//    which Fireworks refuses) is folded back into the standard request form (HH-673).
+//  - After the claim's `story-worktree.mjs create`: copies the main checkout's `.pi/mcp.json` and the
+//    model fields of `.pi/settings.json` into the new worktree (HH-672).
 //  - Effort on the held story (HH-600): Pi's events feed the Claude Code effort engine (human / AI
 //    time, steps, token counts per provider/model), and a work_progress / work_verify /
 //    work_complete call that leaves the measured effort out is refused once, naming the fields.
@@ -20,7 +27,10 @@
 //    holycode_ask (a choice dialog, plain numbered text without a UI).
 //  - `/holycode-hub:models`: add, use, test and remove the developer's own models (HH-603); every
 //    Hub command stops with one line naming it while no model is set.
-//  - `/holycode-hub:login`: signs in again (HH-596).
+//  - `/holycode-hub:login`: signs in again (HH-596), after a confirmation naming the Hub host (HH-672).
+//  - The Hub in use (HH-672): the banner names its host and whether the project or the global config
+//    sets it; a repository whose last Hub was a non-production one and that now resolves to another
+//    gets a loud warning with the fix, and no automatic sign-in for the other Hub.
 //  - Background workers (HH-670): holycode_worker_start / _status / _resume / _stop run separate Pi
 //    sessions in story worktrees (registry in `~/.holycode-hub/pi/workers/`), a 30-minute stall
 //    watchdog, an optional `--worker-timeout <minutes>` hard limit, and a notice in this session when
@@ -34,12 +44,16 @@ import { fileURLToPath } from 'node:url';
 
 import { commandsToRegister, expandArguments, type PiCommandFile } from '../src/commands';
 import { askTool, subagentTool } from '../src/agent-tools';
+import { copyIntoClaimedWorktree } from '../src/claim-worktree';
 import { claudeToolName, effortGuardReason, recordAssistantUsage, recordEvent, type AssistantUsage } from '../src/effort';
 import { piToolName, tagClientKind } from '../src/hub-calls';
+import { applyHubDeltas } from '../src/hub-deltas';
 import { ensureHubServer, piAgentDir } from '../src/hub-server';
+import { checkSessionHub, hubSource, hubWarning, rememberHub, repositoryKey, resolveHub, signInQuestion, type ResolvedHub } from '../src/hub-identity';
 import { needsSignIn, signIn } from '../src/login';
 import { NO_MODEL_LINE, runModelsCommand } from '../src/models';
 import { readRecommended } from '../src/recommended-models';
+import { keepsNativeToolMessages, withContentOnEveryMessage } from '../src/provider-payload';
 import { createCoordinator } from '../src/standing-order-setup';
 import { standingOrderTool } from '../src/standing-order-tool';
 import { modelsListStale, savedTier, saveWorkModelsResult } from '../src/model-tier';
@@ -72,20 +86,31 @@ export let pendingSignInOffer: Promise<void> = Promise.resolve();
 /** The package root: this file lives in `<root>/extensions/`. */
 export const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-async function offerSignIn(pi: PiApi, ctx: PiContext): Promise<void> {
+/** HH-672 — the Hub this session's sign-in reaches (a project entry counts only in a trusted project). */
+function sessionHub(ctx: PiContext): ResolvedHub {
+  return resolveHub(ctx.cwd, piAgentDir(), ctx.isProjectTrusted?.() ?? true);
+}
+
+/** Signs in to `hub`; a finished sign-in makes it this repository's remembered Hub (HH-672). */
+async function signInTo(pi: PiApi, ctx: PiContext, hub: ResolvedHub, runtimeDir: string): Promise<void> {
+  const result = await signIn(pi, ctx.cwd, hub.scope);
+  if (result.ok) rememberHub(runtimeDir, repositoryKey(ctx.cwd), hub.url);
+  ctx.ui.notify(result.message, result.ok ? 'info' : 'error');
+}
+
+async function offerSignIn(pi: PiApi, ctx: PiContext, hub: ResolvedHub, runtimeDir: string): Promise<void> {
   const listed = await pi.exec('pi', ['mcp', 'list', '--json'], { cwd: ctx.cwd, timeout: 30_000 });
   if (!needsSignIn(listed.stdout)) return;
   if (!ctx.hasUI) {
-    ctx.ui.notify('Rapid Dev Hub needs a sign-in: run /holycode-hub:login.', 'warning');
+    ctx.ui.notify(`Rapid Dev Hub at ${hub.host} needs a sign-in: run /holycode-hub:login.`, 'warning');
     return;
   }
-  const yes = await ctx.ui.confirm('Rapid Dev Hub', 'Sign in to Rapid Dev Hub now? Your browser opens the Hub sign-in.');
+  const yes = await ctx.ui.confirm('Rapid Dev Hub', signInQuestion(hub));
   if (!yes) {
     ctx.ui.notify('Sign in any time with /holycode-hub:login.', 'info');
     return;
   }
-  const result = await signIn(pi, ctx.cwd);
-  ctx.ui.notify(result.message, result.ok ? 'info' : 'error');
+  await signInTo(pi, ctx, hub, runtimeDir);
 }
 
 /**
@@ -97,6 +122,20 @@ export function workerNotice(pi: PiApi, context: () => PiContext | undefined): N
     context()?.ui.notify(message, level);
     pi.sendMessage({ customType: WORKER_NOTICE_TYPE, content: message, display: true }, { deliverAs: 'followUp' });
   };
+}
+
+/**
+ * HH-673 — applies a Hub work_sync / work_claim result's deltas; returns the result patch the model
+ * gets instead (undefined: the result stays as it is).
+ */
+function applyDeltas(result: PiToolResultEvent, runtimeDir: string, cwd: string): { content: { type: 'text'; text: string }[] } | undefined {
+  try {
+    const text = applyHubDeltas(result, { runtimeDir, projectRoot: cwd });
+    return text === undefined ? undefined : { content: [{ type: 'text', text }] };
+  } catch {
+    // A result that cannot be read reaches the model unchanged; the Hub call still succeeded.
+    return undefined;
+  }
 }
 
 /** HH-671 — the coordinator follows this session's standing-order claim and each completion it runs. */
@@ -171,8 +210,16 @@ export default function holycodeHub(pi: PiApi): void {
   pi.on('ui_prompt_end', (_event, ctx) => recordEvent(ctx.cwd, { hook_event_name: 'PostToolUse', tool_name: 'AskUserQuestion' }));
   pi.on('message_end', (event, ctx) => recordAssistantUsage(ctx.cwd, piAgentDir(), (event as { message?: AssistantUsage }).message ?? {}));
 
+  pi.on('before_provider_request', (event, ctx) => {
+    if (keepsNativeToolMessages(ctx.model?.baseUrl)) return undefined;
+    return withContentOnEveryMessage((event as { payload?: unknown }).payload);
+  });
+
   pi.on('tool_result', (event, ctx) => {
-    const result = event as PiToolResultEvent;
+    const original = event as PiToolResultEvent;
+    // The deltas are applied first, so every reader below sees the whole result (not Pi's 20 KB cut).
+    const patch = applyDeltas(original, runtimeDir, ctx.cwd);
+    const result: PiToolResultEvent = patch === undefined ? original : { ...original, content: patch.content };
     recordEvent(ctx.cwd, {
       hook_event_name: 'PostToolUse',
       tool_name: claudeToolName(result.toolName),
@@ -181,7 +228,7 @@ export default function holycodeHub(pi: PiApi): void {
       tool_failed: result.isError === true,
     });
     if (!isWorker) followStandingOrder(coordinator, result);
-    if (result.isError === true) return;
+    if (result.isError === true) return undefined;
     try {
       saveWorkModelsResult(runtimeDir, result.toolName, result.content);
     } catch {
@@ -198,6 +245,12 @@ export default function holycodeHub(pi: PiApi): void {
     } catch {
       // A worktree registry that cannot be read never fails the Hub call it follows.
     }
+    try {
+      copyIntoClaimedWorktree(ctx.cwd, result);
+    } catch {
+      // HH-672 — a copy that fails leaves the worktree as created; the banner there names its Hub.
+    }
+    return patch;
   });
 
   pi.on('session_start', async (event, ctx) => {
@@ -210,7 +263,9 @@ export default function holycodeHub(pi: PiApi): void {
       }, WATCHDOG_INTERVAL_MS);
       watchdog.unref?.();
     }
+    const hubCheck = checkSessionHub({ cwd: ctx.cwd, agentDir: piAgentDir(), runtimeDir, trusted: ctx.isProjectTrusted?.() ?? true });
     const banner = sessionBanner({
+      hub: hubCheck,
       cwd: ctx.cwd,
       shippedBlock: path.join(PACKAGE_ROOT, 'agents', 'hub-workflow-section.md'),
       model: ctx.model === undefined ? undefined : { provider: ctx.model.provider, id: ctx.model.id },
@@ -218,6 +273,7 @@ export default function holycodeHub(pi: PiApi): void {
       refreshModels: modelsListStale(runtimeDir),
     });
     pi.sendMessage({ customType: BANNER_TYPE, content: banner.join('\n'), display: true }, { deliverAs: 'nextTurn' });
+    if (hubCheck.expected !== undefined) ctx.ui.notify(hubWarning(hubCheck), 'warning');
     if ((event as { reason?: string }).reason !== 'startup') return;
     if (added === 'added') ctx.ui.notify('Rapid Dev Hub server added to Pi. Run /reload if its tools do not appear.', 'info');
     if (added === 'unreadable') {
@@ -225,8 +281,10 @@ export default function holycodeHub(pi: PiApi): void {
       return;
     }
     // Not awaited: the session starts at once and the question appears beside it. A slow or
-    // missing `pi` binary never stops the session; the command stays available.
-    pendingSignInOffer = offerSignIn(pi, ctx).catch(() => undefined);
+    // missing `pi` binary never stops the session; the command stays available. Never offered for
+    // a Hub other than the one this repository last used (HH-672).
+    if (hubCheck.expected !== undefined) return;
+    pendingSignInOffer = offerSignIn(pi, ctx, hubCheck.hub, runtimeDir).catch(() => undefined);
   });
 
   pi.registerCommand(MODELS_COMMAND, {
@@ -239,8 +297,13 @@ export default function holycodeHub(pi: PiApi): void {
   pi.registerCommand(LOGIN_COMMAND, {
     description: 'Sign in to Rapid Dev Hub again (password reset, organisation switch, revoked token)',
     async handler(_args, ctx) {
-      const result = await signIn(pi, ctx.cwd);
-      ctx.ui.notify(result.message, result.ok ? 'info' : 'error');
+      const hub = sessionHub(ctx);
+      if (ctx.hasUI && !(await ctx.ui.confirm('Rapid Dev Hub', signInQuestion(hub)))) {
+        ctx.ui.notify('Sign-in cancelled.', 'info');
+        return;
+      }
+      if (!ctx.hasUI) ctx.ui.notify(`Signing in to Rapid Dev Hub at ${hub.host} (from ${hubSource(hub)}).`, 'info');
+      await signInTo(pi, ctx, hub, runtimeDir);
     },
   });
 }

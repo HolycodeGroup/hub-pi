@@ -58,11 +58,18 @@ export interface PiToolCallEvent {
   input: Record<string, unknown>;
 }
 
-/** The `tool_result` event of a finished tool call. */
+/**
+ * The `tool_result` event of a finished tool call. A handler may return a patch (`{ content }`) that
+ * replaces the result before the model sees it. For an MCP tool, `content` is the model-facing text
+ * (Pi cuts it in the middle beyond 20 KB), `structuredContent` the raw MCP result and
+ * `details.fullOutputPath` the file holding the full text when it was cut.
+ */
 export interface PiToolResultEvent {
   readonly toolName: string;
   readonly input: Record<string, unknown>;
   readonly content?: readonly unknown[];
+  readonly structuredContent?: unknown;
+  readonly details?: unknown;
   readonly isError?: boolean;
 }
 
