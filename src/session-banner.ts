@@ -3,10 +3,11 @@
 // conventions, the link state from the pointer file, the project rule files to read and a stale
 // AGENTS.md Hub block warning — plus the Pi lines: the Hub the session talks to (HH-672) and the
 // model in use and its tier. Never a network call, never a reason to stop the session.
+// HH-690: the model still gets every line; the chat draws `bannerSummary` (at most two lines).
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { hubBannerLines, type HubCheck } from './hub-identity';
+import { hubBannerLines, hubSource, hubWarning, type HubCheck } from './hub-identity';
 
 const START_MARKER = '<!-- holycode-hub:start -->';
 
@@ -103,4 +104,35 @@ export function sessionBanner(input: BannerInput): string[] {
   const stale = staleBlockLine(input.cwd, input.shippedBlock);
   if (stale !== null) lines.push(stale);
   return [...lines, ...modelLines(input)];
+}
+
+/** The link state in one line: the project and the Hub this session talks to. */
+function linkSummary(input: BannerInput): string {
+  const hub = input.hub === undefined ? '' : ` · Hub ${input.hub.hub.host} (from ${hubSource(input.hub.hub)})`;
+  const pointer = path.join(input.cwd, '.project-management', 'hub-pointer.md');
+  if (!existsSync(pointer)) return `holycode-hub: no Hub project in this directory — run /holycode-hub:init${hub}`;
+  const text = readFileSync(pointer, 'utf8');
+  const projectId = pointerField(text, 'Project ID');
+  if (projectId === '') return `holycode-hub: pointer file is invalid — re-run /holycode-hub:init${hub}`;
+  return input.hub === undefined ? `holycode-hub: linked to project ${projectId} at ${pointerField(text, 'Hub URL') || '<hub-url>'}` : `holycode-hub: linked to project ${projectId}${hub}`;
+}
+
+/** The one warning worth a line in the chat, the loudest first; null when there is none. */
+function summaryWarning(input: BannerInput, extraWarnings: readonly string[]): string | null {
+  if (input.hub?.expected !== undefined) return hubWarning(input.hub);
+  if (extraWarnings.length > 0) return extraWarnings[0] as string;
+  if (input.model === undefined || (input.tier !== 'CERTIFIED' && input.tier !== 'SUPPORTED')) return modelLine(input.model, input.tier);
+  const stale = staleBlockLine(input.cwd, input.shippedBlock);
+  // Only a linked project's banner names a stale block.
+  return stale !== null && sessionBanner(input).includes(stale) ? stale : null;
+}
+
+/**
+ * HH-690 — what the chat shows of the banner by default: the link state and the Hub in one line, and
+ * a second line only for a warning (wrong Hub, another tool in this folder, the model's tier, a stale
+ * AGENTS.md block). The git conventions and the project rules line reach the model in the full banner.
+ */
+export function bannerSummary(input: BannerInput, extraWarnings: readonly string[] = []): string[] {
+  const warning = summaryWarning(input, extraWarnings);
+  return warning === null ? [linkSummary(input)] : [linkSummary(input), warning];
 }

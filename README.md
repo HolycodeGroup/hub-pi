@@ -68,6 +68,12 @@ extension draws each Hub call in it as one line — the outcome, the tool name a
 directly gets the same line. Calls to every other tool (`read`, `bash`, `edit`, …) and scripts that
 never call the Hub look exactly as Pi draws them (HH-678).
 
+A `/holycode-hub:<name>` command shows as one line — the command as typed, e.g.
+`/holycode-hub:status summary` — while the model receives the full command card with the arguments
+filled in; the session-start banner shows at most two lines (the linked project and the Hub, plus a
+warning when there is one) while the model gets every line, the git conventions included. The same
+expand toggle shows either in full (HH-690).
+
 Every command that calls a Hub tool ends with a Pi note telling the script to print only the fields
 the step reports, never the whole result — `/holycode-hub:status` prints the ready stories and the
 summary line (plus the trimmed phase tree for the full board), not the whole JSON answer.

@@ -1,7 +1,8 @@
 // HH-597 — the commands the extension registers: the package's rendered commands (commands/) and
 // the framework cards the Hub delivered (~/.holycode-hub/pi/commands-cache/). Each becomes the
-// `/holycode-hub:<name>` command; running it sends its body, with the arguments filled in, as the
-// developer's message — exactly what Pi does with a prompt template.
+// `/holycode-hub:<name>` command; running it sends its body, with the arguments filled in, to the
+// model — exactly what Pi does with a prompt template — drawn in the chat as one line (HH-690,
+// `command-dispatch.ts`).
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 

@@ -73,11 +73,22 @@ export interface PiToolResultEvent {
   readonly isError?: boolean;
 }
 
-/** A custom message that joins the conversation (`pi.sendMessage`). */
+/**
+ * A custom message that joins the conversation (`pi.sendMessage`). Pi hands `content` to the model as
+ * a user message; `display` decides whether the chat shows it; `details` reaches only a message
+ * renderer, never the model.
+ */
 export interface PiCustomMessage {
   readonly customType: string;
   readonly content: string;
   readonly display: boolean;
+  readonly details?: unknown;
+}
+
+/** How `pi.sendMessage` delivers: `triggerTurn` starts a turn in an idle session (steer / followUp only). */
+export interface PiSendMessageOptions {
+  readonly triggerTurn?: boolean;
+  readonly deliverAs?: 'steer' | 'followUp' | 'nextTurn';
 }
 
 /** The model-facing result of a tool. */
@@ -134,6 +145,28 @@ export interface PiToolRenderers {
   renderResult?(result: PiToolRenderResult, options: { expanded: boolean; isPartial: boolean }, theme: PiTheme, context: PiToolRenderContext): PiComponent;
 }
 
+/** A custom message as a message renderer gets it (Pi's `CustomMessage`, the fields read here). */
+export interface PiRenderedMessage {
+  readonly customType: string;
+  readonly content: string | readonly { type: string; text?: string }[];
+  readonly display: boolean;
+  readonly details?: unknown;
+}
+
+/**
+ * What Pi passes a message renderer (`MessageRenderOptions`, HH-690): `expanded` follows Pi's expand
+ * toggle (`app.tools.expand`, Ctrl+O by default); `keyText` names the keys a keybinding id is bound to.
+ */
+export interface PiMessageRenderOptions {
+  readonly expanded: boolean;
+  readonly outputPad: number;
+  keyText(keybinding: string): string;
+  keyHint(keybinding: string, description: string): string;
+}
+
+/** Draws custom messages of one type (`MessageRenderer`); undefined falls back to Pi's own box. */
+export type PiMessageRenderer = (message: PiRenderedMessage, options: PiMessageRenderOptions, theme: PiTheme) => PiComponent | undefined;
+
 /** Chooses how calls to a tool are drawn; `next()` is what the other resolvers and the tool would use. */
 export type PiToolRendererResolver = (toolName: string, next: () => PiToolRenderers | undefined) => PiToolRenderers | undefined;
 
@@ -145,7 +178,9 @@ export interface PiApi {
   setModel(model: PiModel): Promise<boolean>;
   exec(command: string, args: readonly string[], options?: { timeout?: number; cwd?: string }): Promise<PiExecResult>;
   sendUserMessage(content: string, options?: { deliverAs?: 'steer' | 'followUp' }): void;
-  sendMessage(message: PiCustomMessage, options?: { deliverAs?: 'steer' | 'followUp' | 'nextTurn' }): void;
+  sendMessage(message: PiCustomMessage, options?: PiSendMessageOptions): void;
+  /** Draws the custom messages of one `customType` (HH-690); absent in older Pi versions. */
+  registerMessageRenderer?(customType: string, renderer: PiMessageRenderer): void;
   /** A command-line flag the extension adds (`pi --<name> <value>`), HH-670. */
   registerFlag?(name: string, options: { description: string; type: 'boolean' | 'string'; default?: boolean | string }): void;
   getFlag?(name: string): boolean | string | undefined;

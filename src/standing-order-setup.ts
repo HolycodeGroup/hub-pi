@@ -4,7 +4,8 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 
-import { expandArguments, type PiCommandFile } from './commands';
+import { sendCommand } from './command-dispatch';
+import type { PiCommandFile } from './commands';
 import type { PiApi, PiContext } from './pi-types';
 import { OrderStore, StandingOrderCoordinator, type WorktreeResult } from './standing-order';
 import { prepareWorktree } from './worker-setup';
@@ -71,7 +72,9 @@ export function createCoordinator(setup: CoordinatorSetup): StandingOrderCoordin
     },
     runCommand: (id, args, afterTurn) => {
       const command = setup.commands.find((c) => c.id === id);
-      sendToSession(setup.pi, setup.context(), command === undefined ? `/holycode-hub:${id} ${args}` : expandArguments(command.body, args), afterTurn);
+      // HH-690 — a card goes like a typed command: one line in the chat, the full card for the model.
+      if (command === undefined) sendToSession(setup.pi, setup.context(), `/holycode-hub:${id} ${args}`, afterTurn);
+      else sendCommand(setup.pi, setup.context(), command, args, afterTurn, cwd());
     },
     instruct: (text) => sendToSession(setup.pi, setup.context(), text),
     commitExists,

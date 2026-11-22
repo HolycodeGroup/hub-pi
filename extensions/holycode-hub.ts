@@ -45,6 +45,10 @@
 //    execute-work card. The coordinator session claims once; one confirmation starts one worker per
 //    group; a worker's passed verify makes this session run complete --scope; the stories the Hub
 //    hands out then get workers; a running worker's lease is renewed here before it expires.
+//  - Commands and the banner drawn short (HH-690): a `/holycode-hub:<name>` command's card reaches the
+//    model as a custom message with exactly the text it had before, and the chat shows only the
+//    command as typed; the session banner shows at most two lines (link state and Hub, a warning).
+//    Pi's expand toggle (`app.tools.expand`, Ctrl+O) shows the full text of either.
 //  - Hub calls drawn as one line (HH-678): a codemode script that calls the Hub, and a Hub tool
 //    called directly, show `✓ project_status 160ms` (✗ with the Hub's error code and message) while
 //    the row is collapsed; Pi's expand toggle (Ctrl+O) shows the script and its output. Every other
@@ -52,7 +56,8 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { commandsToRegister, expandArguments, type PiCommandFile } from '../src/commands';
+import { COMMAND_MESSAGE_TYPE, sendCommand } from '../src/command-dispatch';
+import { commandsToRegister, type PiCommandFile } from '../src/commands';
 import { askTool, subagentTool } from '../src/agent-tools';
 import { copyIntoClaimedWorktree } from '../src/claim-worktree';
 import { claudeToolName, effortGuardReason, recordAssistantUsage, recordEvent, sessionStartEffortNote, type AssistantUsage } from '../src/effort';
@@ -71,7 +76,8 @@ import { modelsListStale, savedTier, saveWorkModelsResult } from '../src/model-t
 import type { PiApi, PiContext, PiToolCallEvent, PiToolResultEvent } from '../src/pi-types';
 import { COMMAND_PREFIX } from '../src/render.mjs';
 import { installRuntime, piRuntimeDir } from '../src/runtime';
-import { sessionBanner } from '../src/session-banner';
+import { bannerMessageRenderer, commandMessageRenderer } from '../src/message-render';
+import { bannerSummary, sessionBanner } from '../src/session-banner';
 import type { StandingOrderCoordinator } from '../src/standing-order';
 import { WORKER_ENV } from '../src/worker-process';
 import { claimLimitOf, WorkerRegistry, workersDir } from '../src/worker-registry';
@@ -171,9 +177,7 @@ function registerHubCommand(pi: PiApi, command: PiCommandFile): void {
         ctx.ui.notify(NO_MODEL_LINE, 'warning');
         return;
       }
-      const text = expandArguments(command.body, args);
-      if (ctx.isIdle()) pi.sendUserMessage(text);
-      else pi.sendUserMessage(text, { deliverAs: 'followUp' });
+      sendCommand(pi, ctx, command, args);
     },
   });
 }
@@ -190,6 +194,8 @@ export default function holycodeHub(pi: PiApi): void {
   pi.registerTool(subagentTool());
   pi.registerTool(askTool());
   pi.registerToolRenderer?.(hubCallRenderer);
+  pi.registerMessageRenderer?.(COMMAND_MESSAGE_TYPE, commandMessageRenderer);
+  pi.registerMessageRenderer?.(BANNER_TYPE, bannerMessageRenderer);
 
   const registry = new WorkerRegistry(workersDir(runtimeDir));
   let noticeContext: PiContext | undefined;
@@ -288,16 +294,17 @@ export default function holycodeHub(pi: PiApi): void {
       watchdog.unref?.();
     }
     const hubCheck = checkSessionHub({ cwd: ctx.cwd, agentDir: piAgentDir(), runtimeDir, trusted: ctx.isProjectTrusted?.() ?? true });
-    const banner = sessionBanner({
+    const bannerInput = {
       hub: hubCheck,
       cwd: ctx.cwd,
       shippedBlock: path.join(PACKAGE_ROOT, 'agents', 'hub-workflow-section.md'),
       model: ctx.model === undefined ? undefined : { provider: ctx.model.provider, id: ctx.model.id },
       tier: ctx.model === undefined ? 'UNKNOWN' : savedTier(runtimeDir, ctx.model.provider, ctx.model.id),
       refreshModels: modelsListStale(runtimeDir),
-    });
+    };
     const switching = switchingWarnings(ctx.cwd, hubCheck.hub.url);
-    pi.sendMessage({ customType: BANNER_TYPE, content: [...banner, ...switching].join('\n'), display: true }, { deliverAs: 'nextTurn' });
+    const content = [...sessionBanner(bannerInput), ...switching].join('\n');
+    pi.sendMessage({ customType: BANNER_TYPE, content, display: true, details: { summary: bannerSummary(bannerInput, switching) } }, { deliverAs: 'nextTurn' });
     // HH-681 — effort still unsent here (e.g. the story was completed from another clone): one quiet
     // work_progress per story, asked of the model in a hidden message; nothing shows unless it fails.
     const effortNote = sessionStartEffortNote(ctx.cwd);

@@ -2,6 +2,12 @@
 
 The Pi package has its own version line and never shares a release with the Claude Code plugin.
 
+## [0.2.6]
+
+### Fixed
+
+- **Commands and the session banner are short in the chat (HH-690).** Running a `/holycode-hub:<name>` command now shows one line — the command as typed, e.g. `/holycode-hub:status summary` — instead of the whole command card; the model still receives exactly the same card text, a command run while Pi is busy still runs as a follow-up, and `Ctrl+O` expands the line to the full card. The session-start banner shows at most two lines — the linked project and the Hub, plus a warning when there is one (wrong Hub, Claude Code in the same folder, the model's tier, a stale AGENTS.md block); the git conventions and the project rules still reach the model, and `Ctrl+O` shows the full banner.
+
 ## [0.2.5]
 
 ### Added
