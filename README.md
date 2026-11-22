@@ -58,6 +58,20 @@ passes through the model (HH-673). Before each model request it also folds a mes
 `content` — Pi's form for tools added mid-session, which Fireworks refuses — back into the request's
 tool list.
 
+## Hub calls on screen
+
+In Pi a Hub command runs its Hub calls through `codemode`. While a tool row is collapsed, the
+extension draws each Hub call in it as one line — the outcome, the tool name and the duration, e.g.
+`✓ project_status 160ms`; a failed call stays visible as `✗` with the Hub's error code and message
+(`✗ work_claim 90ms FORBIDDEN_RESOURCE: …`). Pi's expand toggle (`Ctrl+O`, keybinding
+`app.tools.expand`) shows the full script and its output, and collapses it again. A Hub tool called
+directly gets the same line. Calls to every other tool (`read`, `bash`, `edit`, …) and scripts that
+never call the Hub look exactly as Pi draws them (HH-678).
+
+Every command that calls a Hub tool ends with a Pi note telling the script to print only the fields
+the step reports, never the whole result — `/holycode-hub:status` prints the ready stories and the
+summary line (plus the trimmed phase tree for the full board), not the whole JSON answer.
+
 ## Background workers
 
 The extension gives the model four tools that run separate Pi sessions in the background, one per

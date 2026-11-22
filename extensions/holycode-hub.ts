@@ -45,6 +45,10 @@
 //    execute-work card. The coordinator session claims once; one confirmation starts one worker per
 //    group; a worker's passed verify makes this session run complete --scope; the stories the Hub
 //    hands out then get workers; a running worker's lease is renewed here before it expires.
+//  - Hub calls drawn as one line (HH-678): a codemode script that calls the Hub, and a Hub tool
+//    called directly, show `✓ project_status 160ms` (✗ with the Hub's error code and message) while
+//    the row is collapsed; Pi's expand toggle (Ctrl+O) shows the script and its output. Every other
+//    tool is drawn exactly as before.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -52,6 +56,7 @@ import { commandsToRegister, expandArguments, type PiCommandFile } from '../src/
 import { askTool, subagentTool } from '../src/agent-tools';
 import { copyIntoClaimedWorktree } from '../src/claim-worktree';
 import { claudeToolName, effortGuardReason, recordAssistantUsage, recordEvent, sessionStartEffortNote, type AssistantUsage } from '../src/effort';
+import { hubCallRenderer } from '../src/hub-call-render';
 import { piToolName, tagClientKind } from '../src/hub-calls';
 import { applyHubDeltas } from '../src/hub-deltas';
 import { ensureHubServer, piAgentDir } from '../src/hub-server';
@@ -184,6 +189,7 @@ export default function holycodeHub(pi: PiApi): void {
 
   pi.registerTool(subagentTool());
   pi.registerTool(askTool());
+  pi.registerToolRenderer?.(hubCallRenderer);
 
   const registry = new WorkerRegistry(workersDir(runtimeDir));
   let noticeContext: PiContext | undefined;

@@ -8,7 +8,7 @@
 //
 // Zero dependencies, deterministic: the same spec always renders the same bytes (a drift test pins
 // the committed commands/ folder to this renderer).
-import { APPENDED_STEPS, BODY_REPLACEMENTS, DESCRIPTION_REPLACEMENTS, WORDING_OVERRIDES } from './overrides.mjs';
+import { APPENDED_STEPS, BODY_REPLACEMENTS, DESCRIPTION_REPLACEMENTS, HUB_OUTPUT_FIELDS, HUB_OUTPUT_NOTE, INSERTIONS, WORDING_OVERRIDES } from './overrides.mjs';
 
 /**
  * Where the Pi client keeps its runtime files on the developer's machine: the scripts the commands
@@ -43,6 +43,22 @@ export function applyWording(text) {
   return pi;
 }
 
+/** A text that calls a Hub tool: it names the Hub's MCP server or "the `work_…` / `project_…` tool". */
+const HUB_CALL = /`holycode-hub` MCP server|the `(?:work|project)_[a-z_]+` tool/;
+
+/**
+ * HH-678 — a command or card that calls a Hub tool ends with the note that its `codemode` script
+ * prints only the fields the step reports (and, for a command that names them, which fields).
+ * @param {string} id
+ * @param {string} text
+ * @returns {string}
+ */
+export function withHubOutputNote(id, text) {
+  if (!HUB_CALL.test(text)) return text;
+  const fields = HUB_OUTPUT_FIELDS[/** @type {keyof typeof HUB_OUTPUT_FIELDS} */ (id)];
+  return `${text.replace(/\n*$/, '\n')}\n${HUB_OUTPUT_NOTE}${fields === undefined ? '' : ` ${fields}`}\n`;
+}
+
 /**
  * The Pi form of one of the Hub's framework cards (apps/backend/commands/*.md, HH-598): the same
  * path mapping and wording overrides as the commands, applied to the whole card.
@@ -50,7 +66,7 @@ export function applyWording(text) {
  * @returns {string}
  */
 export function toPiCard(card) {
-  return applyWording(mapPluginPaths(card));
+  return withHubOutputNote('', applyWording(mapPluginPaths(card)));
 }
 
 /**
@@ -64,18 +80,33 @@ export function toPiDescription(id, description) {
 }
 
 /**
+ * Inserts the command's own Pi text right before its anchor sentence (INSERTIONS), when it has one.
+ * @param {string} id
+ * @param {string} body
+ * @returns {string}
+ */
+export function applyInsertion(id, body) {
+  const insertion = INSERTIONS[/** @type {keyof typeof INSERTIONS} */ (id)];
+  if (insertion === undefined) return body;
+  const at = body.indexOf(insertion.before);
+  if (at === -1) throw new Error(`Pi insertion for "${id}": anchor not found in the core body`);
+  return `${body.slice(0, at)}${insertion.text}${body.slice(at)}`;
+}
+
+/**
  * The Pi body of one command: a whole-body replacement when the command has one, else the core
- * body with the paths mapped, the wording overrides applied and any Pi step appended.
+ * body with the paths mapped, the wording overrides applied, any Pi text inserted and any Pi step
+ * appended; either way ending with the Hub output note when it calls a Hub tool (HH-678).
  * @param {string} id
  * @param {string} body
  * @returns {string}
  */
 export function toPiBody(id, body) {
   const replacement = BODY_REPLACEMENTS[/** @type {keyof typeof BODY_REPLACEMENTS} */ (id)];
-  if (replacement !== undefined) return replacement;
-  const pi = applyWording(mapPluginPaths(body));
+  if (replacement !== undefined) return withHubOutputNote(id, replacement);
+  const pi = applyInsertion(id, applyWording(mapPluginPaths(body)));
   const appended = APPENDED_STEPS[/** @type {keyof typeof APPENDED_STEPS} */ (id)];
-  return appended === undefined ? pi : `${pi}${appended}`;
+  return withHubOutputNote(id, appended === undefined ? pi : `${pi}${appended}`);
 }
 
 /**

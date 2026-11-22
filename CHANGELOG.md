@@ -2,6 +2,27 @@
 
 The Pi package has its own version line and never shares a release with the Claude Code plugin.
 
+## [0.2.5]
+
+### Added
+
+- **Verify sends how long the tests took (HH-682).** `/holycode-hub:verify` now adds
+  `evidence.timing` to its one `work_verify` call: the local gate's wall time per suite, the pull
+  request's latest finished CI run with each job and shard (read with `gh`, only when the branch has a
+  pull request) and the 10 slowest test files from the runners' JSON reports — whole milliseconds and
+  relative file paths only, never test code or output. Optional: a Hub without it still verifies.
+- **The claim shows a speed-up task with Accept / Defer (HH-684).** When the Hub hands a claim the
+  repository's speed-up task (its tests are slow), `/holycode-hub:claim` shows it in one line — apart
+  from the story's acceptance criteria — and asks Accept into this story or Defer to the next claim in a
+  selection dialog, sending the answer with one `work_progress` call; a task deferred 3 times shows the
+  Hub's question with the link to the project's Effort tab, where its story is created.
+  `/holycode-hub:verify` adds `evidence.speed_up.reason` when an accepted task's new run still fails
+  its rule.
+
+### Changed
+
+- **Each Hub call is one collapsed line (HH-678).** A Hub tool call made through `codemode` now shows as one line — `✓ project_status 160ms`, or `✗` with the Hub's error code and message — instead of the script and a wall of escaped JSON; `Ctrl+O` expands it to the full script and output and collapses it again. Every command that calls a Hub tool tells its script to print only the fields the step reports (`/holycode-hub:status` prints the ready stories and the summary line). Other tools look exactly as before.
+
 ## [0.2.4]
 
 ### Added

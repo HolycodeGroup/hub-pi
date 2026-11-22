@@ -97,6 +97,46 @@ export interface PiTool {
   execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: unknown, ctx: PiContext): Promise<PiToolResult>;
 }
 
+/** A TUI component (`@earendil-works/pi-tui`): the lines it draws at a width. */
+export interface PiComponent {
+  render(width: number): readonly string[];
+  invalidate(): void;
+}
+
+/** The colours a renderer styles text with (Pi's `Theme`, the slice this package calls). */
+export interface PiTheme {
+  fg(color: string, text: string): string;
+  bold(text: string): string;
+}
+
+/** What Pi passes a tool renderer about the row it draws (`ToolRenderContext`, the fields read here). */
+export interface PiToolRenderContext {
+  readonly args: unknown;
+  readonly expanded: boolean;
+  readonly isPartial: boolean;
+  readonly isError: boolean;
+  /** How long the call took, from the final result; undefined while it runs. */
+  readonly durationMs: number | undefined;
+  readonly lastComponent: PiComponent | undefined;
+  readonly [key: string]: unknown;
+}
+
+/** The result a tool renderer draws: the model-facing content and the tool's details. */
+export interface PiToolRenderResult {
+  readonly content: readonly { type: string; text?: string }[];
+  readonly details?: unknown;
+}
+
+/** How calls to one tool are drawn (`ToolRenderers`). */
+export interface PiToolRenderers {
+  readonly renderShell?: 'default' | 'self';
+  renderCall?(args: unknown, theme: PiTheme, context: PiToolRenderContext): PiComponent;
+  renderResult?(result: PiToolRenderResult, options: { expanded: boolean; isPartial: boolean }, theme: PiTheme, context: PiToolRenderContext): PiComponent;
+}
+
+/** Chooses how calls to a tool are drawn; `next()` is what the other resolvers and the tool would use. */
+export type PiToolRendererResolver = (toolName: string, next: () => PiToolRenderers | undefined) => PiToolRenderers | undefined;
+
 /** `ExtensionAPI` — what an extension's default export receives. */
 export interface PiApi {
   on(event: string, handler: (event: unknown, ctx: PiContext) => unknown): void;
@@ -109,4 +149,6 @@ export interface PiApi {
   /** A command-line flag the extension adds (`pi --<name> <value>`), HH-670. */
   registerFlag?(name: string, options: { description: string; type: 'boolean' | 'string'; default?: boolean | string }): void;
   getFlag?(name: string): boolean | string | undefined;
+  /** Draws calls to any tool, the ones other extensions register included (HH-678); absent in older Pi versions. */
+  registerToolRenderer?(resolver: PiToolRendererResolver): void;
 }
