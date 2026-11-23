@@ -2,6 +2,17 @@
 
 The Pi package has its own version line and never shares a release with the Claude Code plugin.
 
+## [0.2.7]
+
+### Added
+
+- **Pi: plan runs record the model used (HH-593).** The reverse-engineer and adopt-project commands send the model of the Pi session — any provider — as `model_usage`, so the Hub records which model produced the plan. A new `effort-capture.mjs model` step names the model the session last answered with (only its id, never message text), also when no story is claimed. The heavy commands' model advice comes from the Hub guidance they already fetch, in provider-neutral words.
+- **Acceptance against the Claude Code plugin (HH-605).** A parity table (`docs/PI-CLIENT-PARITY.md`) lists every command and hook of the Claude Code plugin as working on Pi, working through Pi's own mechanism, or a known gap with its reason, and names the test for each; a test keeps it complete. New tests prove a Claude Code developer and a Pi developer can work on one project at the same time without conflicting over the Hub pointer, the `AGENTS.md` block, the project rules or the story worktrees.
+
+### Fixed
+
+- **Pi: a completed story says when its measured effort was not recorded (HH-700).** After a `work_complete` that left measured time segments or token counts behind, Pi now shows the same warning as Claude Code ("… was completed without …; the Hub accepts them only up to completion, so they are not recorded."), worded by the shared effort engine. A completion that carried everything, or a failed one, shows nothing.
+
 ## [0.2.6]
 
 ### Fixed

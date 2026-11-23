@@ -6,17 +6,30 @@
 // extension (src/effort.ts) instead of Claude Code hooks; the one Pi difference is how each model
 // is paid for, which the extension records per model (state.usage.piSources) from Pi's own sign-in:
 // an API key, a subscription login, or a local model (UNKNOWN). Counts and timestamps only.
+// HH-593: `effort-capture.mjs model` prints the model in use (recorded by the extension from the
+// session's assistant messages, also without a claim) for the reverse-engineer and adopt-project runs.
 import console from 'node:console';
 import { realpathSync } from 'node:fs';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-import { loadState, saveState, stateFileFor, take, usageReport } from './effort-core.mjs';
+import { loadState, modelReport, saveState, stateFileFor, take, usageReport } from './effort-core.mjs';
 
 /** The model_usage report with each model's own payment source (UNKNOWN when none was recorded). */
 export function piUsageReport(state) {
   const sources = state.usage?.piSources ?? {};
   return usageReport(state, 'UNKNOWN').map((entry) => ({ ...entry, source: sources[entry.model] ?? 'UNKNOWN' }));
+}
+
+/**
+ * HH-593 — the model in use as a one-entry model_usage array with zero counts (reverse-engineer and
+ * adopt-project run without a claim, so `usage` prints [] there); its source is the one Pi recorded
+ * with it. `[]` before Pi has recorded any model in this folder.
+ */
+export function piModelReport(state) {
+  const model = state.usage?.model;
+  const source = state.usage?.piModelSource ?? state.usage?.piSources?.[model] ?? 'UNKNOWN';
+  return modelReport(model, source);
 }
 
 export function run(command, cwd, now) {
@@ -28,6 +41,7 @@ export function run(command, cwd, now) {
     return JSON.stringify(segments);
   }
   if (command === 'usage') return JSON.stringify(piUsageReport(state));
+  if (command === 'model') return JSON.stringify(piModelReport(state));
   return '';
 }
 

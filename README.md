@@ -48,6 +48,11 @@ Pi instead of restarting Claude Code, the Pi sign-in) are listed in one file,
 node packages/client-pi/tools/sync-from-core.mjs
 ```
 
+Which command and hook works on Pi, works there in Pi's own way, or is still a known gap — with the
+test that proves each — is listed in the parity table,
+[`docs/PI-CLIENT-PARITY.md`](../../docs/PI-CLIENT-PARITY.md) (HH-605). A test fails when the Claude
+Code plugin gains a command or hook that the table does not list.
+
 On load the extension copies the scripts the commands run, the `AGENTS.md` Hub block and the package
 version to `~/.holycode-hub/pi/`; the framework cards the Hub delivers (`/holycode-hub:sync-commands`)
 land in `~/.holycode-hub/pi/commands-cache/` and become commands after `/reload`. Every Hub

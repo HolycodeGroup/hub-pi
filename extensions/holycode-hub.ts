@@ -60,7 +60,7 @@ import { COMMAND_MESSAGE_TYPE, sendCommand } from '../src/command-dispatch';
 import { commandsToRegister, type PiCommandFile } from '../src/commands';
 import { askTool, subagentTool } from '../src/agent-tools';
 import { copyIntoClaimedWorktree } from '../src/claim-worktree';
-import { claudeToolName, effortGuardReason, recordAssistantUsage, recordEvent, sessionStartEffortNote, type AssistantUsage } from '../src/effort';
+import { claudeToolName, effortGuardReason, forgetSessionModel, recordAssistantUsage, recordEvent, sessionStartEffortNote, type AssistantUsage } from '../src/effort';
 import { hubCallRenderer } from '../src/hub-call-render';
 import { piToolName, tagClientKind } from '../src/hub-calls';
 import { applyHubDeltas } from '../src/hub-deltas';
@@ -250,13 +250,15 @@ export default function holycodeHub(pi: PiApi): void {
     const patch = applyDeltas(original, runtimeDir, ctx.cwd);
     const result: PiToolResultEvent = patch === undefined ? original : { ...original, content: patch.content };
     beat(ctx.cwd);
-    recordEvent(ctx.cwd, {
+    const undelivered = recordEvent(ctx.cwd, {
       hook_event_name: 'PostToolUse',
       tool_name: claudeToolName(result.toolName),
       tool_input: result.input,
       tool_response: { content: result.content ?? [] },
       tool_failed: result.isError === true,
     });
+    // HH-700 — effort a work_complete left behind is not recorded; say so, in the engine's own words.
+    if (undelivered !== null) ctx.ui.notify(undelivered, 'warning');
     if (!isWorker) followStandingOrder(coordinator, result);
     if (result.isError === true) return undefined;
     try {
@@ -308,6 +310,8 @@ export default function holycodeHub(pi: PiApi): void {
     // HH-681 — effort still unsent here (e.g. the story was completed from another clone): one quiet
     // work_progress per story, asked of the model in a hidden message; nothing shows unless it fails.
     const effortNote = sessionStartEffortNote(ctx.cwd);
+    // HH-593 — the `model` step names only a model this session answered with.
+    forgetSessionModel(ctx.cwd);
     if (effortNote !== null) pi.sendMessage({ customType: EFFORT_NOTE_TYPE, content: effortNote, display: false }, { deliverAs: 'nextTurn' });
     if (hubCheck.expected !== undefined) ctx.ui.notify(hubWarning(hubCheck), 'warning');
     if (switching.length > 0) ctx.ui.notify(switching.join('\n'), 'warning');

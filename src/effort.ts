@@ -7,8 +7,11 @@
 //   agent settled (`agent_settled`)   → Stop               (human time starts)
 //   session ends (`session_shutdown`) → SessionEnd
 //   a dialog waits (`ui_prompt_*`)    → AskUserQuestion    (that wait is human time)
-//   a tool finished (`tool_result`)   → PostToolUse        (Pi's bash/edit/write named as Claude Code's)
-//   an assistant message ends         → its token counts, as `provider/model`, with how it is paid for
+//   a tool finished (`tool_result`)   → PostToolUse        (Pi's bash/edit/write named as Claude Code's);
+//                                        HH-700: after a work_complete, the engine's note on effort that
+//                                        did not travel with it
+//   an assistant message ends         → its token counts, as `provider/model`, with how it is paid for;
+//                                        HH-593: and the model in use, also without a claim
 //
 //   session starts (`session_start`)  → the quiet send of unsent effort (HH-681, below)
 //
@@ -23,12 +26,14 @@ import {
   applyEvent,
   attachEffort,
   loadState,
+  noteModel,
   pointerProjectId,
   projectRootFor,
   saveState,
   sessionStartNote,
   sessionStartSends,
   stateFileFor,
+  undeliveredNote,
 } from '../scripts/effort-core.mjs';
 
 type Source = 'API_KEY' | 'SUBSCRIPTION' | 'UNKNOWN';
@@ -41,7 +46,8 @@ export function claudeToolName(piTool: string): string {
 }
 
 interface EngineState {
-  usage: { messages: Record<string, unknown>; piSources?: Record<string, Source> };
+  /** HH-593 — `model` / `piModelSource`: the model in use and how it is paid for, kept with or without a claim. */
+  usage: { messages: Record<string, unknown>; piSources?: Record<string, Source>; model?: string; piModelSource?: Source };
   reminded?: Record<string, boolean>;
   story: unknown;
 }
@@ -54,12 +60,28 @@ function withState<T>(cwd: string, change: (state: EngineState) => T): T {
   return result;
 }
 
-/** Feeds one translated hook event to the engine. Never throws: effort must never stop a session. */
-export function recordEvent(cwd: string, event: Record<string, unknown>, now: number = Date.now()): void {
+/** A successful work_complete — the one call after which effort it left behind can no longer reach the Hub. */
+function isSuccessfulCompletion(event: Record<string, unknown>): boolean {
+  return event.hook_event_name === 'PostToolUse' && /__work_complete$/.test(String(event.tool_name ?? '')) && event.tool_failed !== true;
+}
+
+/**
+ * Feeds one translated hook event to the engine. Never throws: effort must never stop a session.
+ *
+ * @returns HH-700 — after a successful work_complete that left measured time segments or token counts
+ *   unreported, the engine's own note for the developer (the text Claude Code shows, HH-199); otherwise
+ *   null. Read before the event is applied, since the completion clears the held story's effort.
+ */
+export function recordEvent(cwd: string, event: Record<string, unknown>, now: number = Date.now()): string | null {
   try {
-    withState(cwd, (state) => applyEvent(state as never, { cwd, ...event } as never, now));
+    return withState(cwd, (state) => {
+      const note = isSuccessfulCompletion(event) ? (undeliveredNote(state as never, event.tool_input as never, 'UNKNOWN') as string | null) : null;
+      applyEvent(state as never, { cwd, ...event } as never, now);
+      return note;
+    });
   } catch {
     // An unreadable buffer loses this event only.
+    return null;
   }
 }
 
@@ -92,7 +114,11 @@ export interface AssistantUsage {
   readonly usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
 }
 
-/** Keeps one assistant message's token counts as `provider/model`, with its payment source. */
+/**
+ * Keeps one assistant message's token counts as `provider/model`, with its payment source. HH-593: the
+ * model and its source are also kept without a claim, so `effort-capture.mjs model` can name the model
+ * of a reverse-engineer or adopt-project run (only the model id — never message text).
+ */
 export function recordAssistantUsage(cwd: string, agentDir: string, message: AssistantUsage, now: number = Date.now()): void {
   if (message.role !== 'assistant' || message.usage === undefined || !message.provider || !message.model) return;
   const model = `${message.provider}/${message.model}`;
@@ -113,10 +139,30 @@ export function recordAssistantUsage(cwd: string, agentDir: string, message: Ass
   try {
     withState(cwd, (state) => {
       absorbTranscript(state as never, [line]);
-      if (state.story !== null) state.usage.piSources = { ...(state.usage.piSources ?? {}), [model]: providerSource(agentDir, message.provider as string) };
+      const source = providerSource(agentDir, message.provider as string);
+      if (state.story !== null) state.usage.piSources = { ...(state.usage.piSources ?? {}), [model]: source };
+      noteModel(state as never, model);
+      // The source belongs to the model only when the model was kept (an id the Hub refuses keeps neither).
+      if (state.usage.model === model) state.usage.piModelSource = source;
     });
   } catch {
     // An unreadable buffer loses this message's counts only.
+  }
+}
+
+/**
+ * HH-593 — a new session forgets the model the previous one recorded, so the `model` step only ever
+ * names a model of the current session (a plan is never attributed to a model that did not make it).
+ * Called at `session_start`. Never throws.
+ */
+export function forgetSessionModel(cwd: string): void {
+  try {
+    withState(cwd, (state) => {
+      delete state.usage.model;
+      delete state.usage.piModelSource;
+    });
+  } catch {
+    // An unreadable buffer has no model to forget.
   }
 }
 
