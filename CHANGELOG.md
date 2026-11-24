@@ -2,6 +2,10 @@
 
 The Pi package has its own version line and never shares a release with the Claude Code plugin.
 
+## [0.2.8]
+
+- Rebuilt the package; no entry describes a change.
+
 ## [0.2.7]
 
 ### Added
